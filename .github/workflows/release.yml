@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress
+
+      - name: Extract tag version
+        id: get_version
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $ver = $tag.TrimStart('v', 'V')
+          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+
+      - name: Run Tests
+        run: dotnet test DC-ScreenSharing.sln --configuration Release
+
+      - name: Build and Package Release Installer
+        shell: pwsh
+        run: |
+          .\scripts\build-release.ps1 -Configuration Release -Version ${{ steps.get_version.outputs.VERSION }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/installer/DC-ScreenSharing-Setup-${{ steps.get_version.outputs.VERSION }}.exe
+            dist/installer/SHA256SUMS.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

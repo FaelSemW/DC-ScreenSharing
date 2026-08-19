@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\server\DCSS.ProfileService\DCSS.ProfileService.csproj" />
+    <ProjectReference Include="..\..\tools\DCSS.Maintainer\DCSS.Maintainer.csproj" />
+    <ProjectReference Include="..\..\src\DC-ScreenSharing.Networking\DC-ScreenSharing.Networking.csproj" />
+    <ProjectReference Include="..\..\src\DC-ScreenSharing.Core\DC-ScreenSharing.Core.csproj" />
+    <ProjectReference Include="..\..\src\DC-ScreenSharing.Shared\DC-ScreenSharing.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

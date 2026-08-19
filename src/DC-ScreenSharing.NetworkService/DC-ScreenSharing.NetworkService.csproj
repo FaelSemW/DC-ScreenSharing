@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>DCSS.NetworkService</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DC-ScreenSharing.Shared\DC-ScreenSharing.Shared.csproj" />
+    <ProjectReference Include="..\DC-ScreenSharing.Networking\DC-ScreenSharing.Networking.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\runtimes\win-x64\native\*.*" Link="native\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

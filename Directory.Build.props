@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Authors>DC-ScreenSharing Team</Authors>
+    <Company>DC-ScreenSharing</Company>
+    <Product>DC-ScreenSharing</Product>
+    <Copyright>Copyright (C) 2026 DC-ScreenSharing contributors</Copyright>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+</Project>

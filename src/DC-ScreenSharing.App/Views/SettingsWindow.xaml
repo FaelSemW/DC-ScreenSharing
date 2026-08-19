@@ -1,0 +1,63 @@
+<Window x:Class="DCScreenSharing.App.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Settings"
+        Height="460" Width="360"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="{StaticResource BackgroundBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Settings" FontSize="18" FontWeight="Bold" Margin="0,0,0,16" />
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- Discord Flavor Preference -->
+                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="Discord Edition" FontWeight="SemiBold" FontSize="13" />
+                        <TextBlock Text="Select which Discord version to launch" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,8" />
+                        <ComboBox x:Name="ComboFlavor" FontSize="13" Padding="6,4" SelectionChanged="OnFlavorSelectionChanged" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Behavior Toggles -->
+                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="Behavior" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,8" />
+                        <CheckBox x:Name="CheckAutoLaunch" Content="Launch Discord automatically" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,8" Checked="OnSettingChecked" Unchecked="OnSettingChecked" />
+                        <CheckBox x:Name="CheckStartMinimized" Content="Start minimized to tray" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,8" Checked="OnSettingChecked" Unchecked="OnSettingChecked" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Diagnostics & Logs -->
+                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="Diagnostics" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,8" />
+                        <Button Content="Open Logs Folder" Style="{StaticResource SecondaryButtonStyle}" Click="OnOpenLogsClick" Margin="0,0,0,6" HorizontalAlignment="Stretch" />
+                        <Button Content="Export Diagnostics Bundle (.zip)" Style="{StaticResource SecondaryButtonStyle}" Click="OnExportDiagnosticsClick" HorizontalAlignment="Stretch" />
+                    </StackPanel>
+                </Border>
+
+                <!-- About -->
+                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12">
+                    <StackPanel>
+                        <TextBlock Text="About" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,4" />
+                        <TextBlock Text="DC-ScreenSharing v1.0.0" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Text="Legitimate Application-Specific Routing" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Close Button -->
+        <Button Grid.Row="2" Content="Close" Style="{StaticResource SecondaryButtonStyle}" Click="OnCloseClick" HorizontalAlignment="Right" Margin="0,12,0,0" Padding="20,6" />
+    </Grid>
+</Window>

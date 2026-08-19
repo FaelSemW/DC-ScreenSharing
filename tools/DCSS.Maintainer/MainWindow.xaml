@@ -1,0 +1,205 @@
+<Window x:Class="DCSS.Maintainer.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DCSS Server &amp; Profile Maintainer"
+        Height="720" Width="980"
+        WindowStartupLocation="CenterScreen"
+        Background="#0F172A" Foreground="#F8FAFC">
+
+    <Window.Resources>
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#1E293B" />
+        <SolidColorBrush x:Key="CardBorderBrush" Color="#334155" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#3B82F6" />
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#94A3B8" />
+
+        <Style TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Segoe UI, Segoe UI Variable, Arial" />
+            <Setter Property="Foreground" Value="#F8FAFC" />
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#0F172A" />
+            <Setter Property="Foreground" Value="#F8FAFC" />
+            <Setter Property="BorderBrush" Value="#475569" />
+            <Setter Property="Padding" Value="6,4" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="DCSS Server &amp; Profile Maintainer" FontSize="20" FontWeight="Bold" />
+                <TextBlock Text="Cryptographic Signing &amp; Remote ProfileService Manager" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="Next Generation:" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBox Text="{Binding Generation}" Width="60" TextAlignment="Center" Margin="0,0,16,0" />
+                <TextBlock Text="Validity (Days):" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBox Text="{Binding ValidityDays}" Width="40" TextAlignment="Center" />
+            </StackPanel>
+        </Grid>
+
+        <!-- ProfileService Connection Settings -->
+        <Border Grid.Row="1" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="130" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="120" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="ProfileService URL:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBox Grid.Column="1" Text="{Binding ServiceUrl}" Margin="0,0,12,0" />
+                <TextBlock Grid.Column="2" Text="Admin API Key:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBox Grid.Column="3" Text="{Binding AdminApiKey}" Margin="0,0,12,0" />
+                <Button Grid.Column="4" Content="Create Activation Code" Click="OnCreateTicketClick" Background="#2563EB" Foreground="White" FontWeight="SemiBold" Padding="14,6" BorderThickness="0" />
+            </Grid>
+        </Border>
+
+        <!-- Main Content -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="280" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Server List -->
+            <Border Grid.Column="0" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,10,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="Servers" FontWeight="Bold" Margin="0,0,0,8" />
+                    <ListBox Grid.Row="1" ItemsSource="{Binding Servers}" SelectedItem="{Binding SelectedServer}" Background="Transparent" BorderThickness="0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="2">
+                                    <TextBlock Text="{Binding Id}" FontWeight="SemiBold" Width="55" />
+                                    <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis" Width="180" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel Grid.Row="2" Orientation="Vertical" Margin="0,8,0,0">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <Button Content="+ Add" Click="OnAddServerClick" Background="#334155" Foreground="White" Padding="10,4" Margin="0,0,6,0" BorderThickness="0" />
+                            <Button Content="+ Import .conf..." Click="OnImportNewConfClick" Background="#2563EB" Foreground="White" Padding="10,4" Margin="0,0,6,0" BorderThickness="0" />
+                            <Button Content="- Remove" Click="OnRemoveServerClick" Background="#334155" Foreground="White" Padding="8,4" BorderThickness="0" />
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Server Details Editor -->
+            <Border Grid.Column="1" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="16">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel DataContext="{Binding SelectedServer}">
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Server Configuration" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Content="Replace from .conf..." Click="OnReplaceConfClick" Background="#334155" Foreground="White" Padding="10,4" BorderThickness="0" />
+                        </Grid>
+
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="80" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Server ID:" VerticalAlignment="Center" />
+                            <TextBox Grid.Column="1" Text="{Binding Id}" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="2" Text="Region:" VerticalAlignment="Center" />
+                            <TextBox Grid.Column="3" Text="{Binding Region}" />
+                        </Grid>
+
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Display Name:" VerticalAlignment="Center" />
+                            <TextBox Grid.Column="1" Text="{Binding Name}" />
+                        </Grid>
+
+                        <CheckBox Content="Server Enabled in Catalog" IsChecked="{Binding Enabled}" Foreground="White" Margin="110,0,0,16" />
+
+                        <TextBlock Text="WireGuard Tunnel Settings" FontWeight="Bold" FontSize="13" Margin="0,0,0,8" />
+
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="60" />
+                                <ColumnDefinition Width="80" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Endpoint IP/Host:" VerticalAlignment="Center" />
+                            <TextBox Grid.Column="1" Text="{Binding Endpoint}" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="2" Text="Port:" VerticalAlignment="Center" />
+                            <TextBox Grid.Column="3" Text="{Binding Port}" />
+                        </Grid>
+
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Client Address:" VerticalAlignment="Center" />
+                            <TextBox Grid.Column="1" Text="{Binding Address}" />
+                        </Grid>
+
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Peer Public Key:" VerticalAlignment="Center" />
+                            <TextBox Grid.Column="1" Text="{Binding PeerPublicKey}" />
+                        </Grid>
+
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Private Key:" VerticalAlignment="Center" />
+                            <TextBox Grid.Column="1" Text="{Binding PrivateKey}" Margin="0,0,6,0" />
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <!-- Footer / Actions -->
+        <Grid Grid.Row="3" Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button Content="Key Manager..." Click="OnKeyManagerClick" Background="#334155" Foreground="White" Padding="12,8" Margin="0,0,8,0" BorderThickness="0" />
+                <Button Content="Rollback Prev Gen..." Click="OnRollbackClick" Background="#EF4444" Foreground="White" Padding="12,8" Margin="0,0,8,0" BorderThickness="0" />
+                <Button Content="Publish to ProfileService" Click="OnPublishToServiceClick" Background="{StaticResource AccentBrush}" Foreground="White" FontWeight="Bold" Padding="16,8" BorderThickness="0" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

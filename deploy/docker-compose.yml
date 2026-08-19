@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  profile-service:
+    build:
+      context: ..
+      dockerfile: server/DCSS.ProfileService/Dockerfile
+    container_name: dcss-profile-service
+    restart: unless-stopped
+    ports:
+      - "${PORT:-5000}:5000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5000
+      - ADMIN_API_KEY=${ADMIN_API_KEY}
+      - ProfileService__StoragePath=/app/storage
+    volumes:
+      - dcss-profile-data:/app/storage
+
+volumes:
+  dcss-profile-data:
+    driver: local

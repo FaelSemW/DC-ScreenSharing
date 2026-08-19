@@ -1,0 +1,25 @@
+# Exclude sensitive configuration & keys
+configs/
+*.conf
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+*.p12
+
+# Exclude build output and test directories
+bin/
+obj/
+dist/
+runtimes/
+TestResults/
+coverage/
+storage/
+
+# Exclude git & ide
+.git
+.vs
+.idea
+.vscode

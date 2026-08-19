@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DC-ScreenSharing.Shared\DC-ScreenSharing.Shared.csproj" />
+    <ProjectReference Include="..\DC-ScreenSharing.Core\DC-ScreenSharing.Core.csproj" />
+  </ItemGroup>
+
+</Project>

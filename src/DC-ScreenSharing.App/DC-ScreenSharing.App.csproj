@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>DCScreenSharing.App</RootNamespace>
+    <AssemblyName>DC-ScreenSharing</AssemblyName>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DC-ScreenSharing.Shared\DC-ScreenSharing.Shared.csproj" />
+    <ProjectReference Include="..\DC-ScreenSharing.Core\DC-ScreenSharing.Core.csproj" />
+    <ProjectReference Include="..\DC-ScreenSharing.Networking\DC-ScreenSharing.Networking.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\runtimes\win-x64\native\*.*" Link="native\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

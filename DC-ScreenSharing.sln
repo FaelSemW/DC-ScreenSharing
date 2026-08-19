@@ -1,0 +1,54 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{76CBA001-F515-4315-9260-3429D08749AB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DC-ScreenSharing.App", "src\DC-ScreenSharing.App\DC-ScreenSharing.App.csproj", "{667A3B62-C022-4AEB-849E-5815E39BB14E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{AFBEAC8A-9348-49DD-8237-28D2CCDD7C80}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DCSS.Maintainer", "tools\DCSS.Maintainer\DCSS.Maintainer.csproj", "{6C40CFFB-4CEC-4B0D-A8E6-148E8627F3F6}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "server", "server", "{B1BFF2B8-9F55-422D-AD7F-09D1291510A7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DCSS.ProfileService", "server\DCSS.ProfileService\DCSS.ProfileService.csproj", "{455D458E-3AB0-4C82-B682-3AEA49730E5C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{DD23A06E-C209-46A0-AEA9-AAE557AF2843}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DC-ScreenSharing.IntegrationTests", "tests\DC-ScreenSharing.IntegrationTests\DC-ScreenSharing.IntegrationTests.csproj", "{1EF2FA61-2CE0-4566-912F-33B56A9A32C4}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{667A3B62-C022-4AEB-849E-5815E39BB14E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{667A3B62-C022-4AEB-849E-5815E39BB14E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{667A3B62-C022-4AEB-849E-5815E39BB14E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{667A3B62-C022-4AEB-849E-5815E39BB14E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6C40CFFB-4CEC-4B0D-A8E6-148E8627F3F6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6C40CFFB-4CEC-4B0D-A8E6-148E8627F3F6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6C40CFFB-4CEC-4B0D-A8E6-148E8627F3F6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6C40CFFB-4CEC-4B0D-A8E6-148E8627F3F6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{455D458E-3AB0-4C82-B682-3AEA49730E5C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{455D458E-3AB0-4C82-B682-3AEA49730E5C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{455D458E-3AB0-4C82-B682-3AEA49730E5C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{455D458E-3AB0-4C82-B682-3AEA49730E5C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1EF2FA61-2CE0-4566-912F-33B56A9A32C4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1EF2FA61-2CE0-4566-912F-33B56A9A32C4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1EF2FA61-2CE0-4566-912F-33B56A9A32C4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1EF2FA61-2CE0-4566-912F-33B56A9A32C4}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{667A3B62-C022-4AEB-849E-5815E39BB14E} = {76CBA001-F515-4315-9260-3429D08749AB}
+		{6C40CFFB-4CEC-4B0D-A8E6-148E8627F3F6} = {AFBEAC8A-9348-49DD-8237-28D2CCDD7C80}
+		{455D458E-3AB0-4C82-B682-3AEA49730E5C} = {B1BFF2B8-9F55-422D-AD7F-09D1291510A7}
+		{1EF2FA61-2CE0-4566-912F-33B56A9A32C4} = {DD23A06E-C209-46A0-AEA9-AAE557AF2843}
+	EndGlobalSection
+EndGlobal

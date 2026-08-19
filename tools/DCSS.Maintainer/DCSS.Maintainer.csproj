@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>DCSS.Maintainer</RootNamespace>
+    <AssemblyName>DCSS.Maintainer</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DC-ScreenSharing.Shared\DC-ScreenSharing.Shared.csproj" />
+    <ProjectReference Include="..\..\src\DC-ScreenSharing.Core\DC-ScreenSharing.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,49 @@
+## Build & Output directories
+bin/
+obj/
+dist/
+runtimes/
+
+## Local Production & Sensitive Configuration
+configs/
+*.conf
+*.dat
+identity.dat
+
+## Environment & Secrets
+.env
+.env.*
+!.env.example
+
+*.key
+*.pem
+*.pfx
+*.p12
+
+## Service Local Storage
+server/DCSS.ProfileService/storage/
+storage/
+
+## Visual Studio & IDE
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.idea/
+.vscode/
+
+## Test & Coverage Results
+TestResults/
+*.trx
+coverage/
+
+## OS & Logs
+*.log
+*.tmp
+thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+test_engine_cfg.json
+icon.ico
