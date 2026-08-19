@@ -48,10 +48,12 @@ public class MainViewModel : INotifyPropertyChanged
     private readonly NetworkServiceClient _networkClient;
     private readonly ApplicationUpdateService _updateService;
     private readonly DiagnosticsService _diagnosticsService;
+    private readonly TunnelHealthMonitor _healthMonitor;
 
     private UserSettings _settings;
     private DiscordInstallation? _detectedDiscord;
     private ServerEntry? _selectedServer;
+    private TunnelConfiguration? _activeTunnelConfig;
     private string _statusText = "Disconnected";
     private string _statusDetail = "Ready to connect";
     private string _discordStatusText = "Detecting Discord...";
@@ -172,7 +174,8 @@ public class MainViewModel : INotifyPropertyChanged
         ConnectionStateMachine stateMachine,
         NetworkServiceClient networkClient,
         ApplicationUpdateService updateService,
-        DiagnosticsService diagnosticsService)
+        DiagnosticsService diagnosticsService,
+        TunnelHealthMonitor? healthMonitor = null)
     {
         _logger = logger;
         _discordLocator = discordLocator;
@@ -184,6 +187,10 @@ public class MainViewModel : INotifyPropertyChanged
         _networkClient = networkClient;
         _updateService = updateService;
         _diagnosticsService = diagnosticsService;
+        _healthMonitor = healthMonitor ?? new TunnelHealthMonitor(logger);
+
+        _healthMonitor.HealthChanged += OnHealthChanged;
+        _healthMonitor.OnPerformRecoveryAsync = PerformTunnelRecoveryAsync;
 
         _settings = _settingsManager.Load();
 
@@ -406,10 +413,13 @@ public class MainViewModel : INotifyPropertyChanged
                 DiscordExecutablePath = _detectedDiscord.ExecutablePath
             };
 
+            _activeTunnelConfig = tunnelConfig;
+
             var tunnelResult = await _networkClient.StartTunnelAsync(tunnelConfig);
             if (!tunnelResult.Success)
             {
                 _logger.Error($"StartTunnel failed: {tunnelResult.Message}. Performing clean recovery...");
+                _activeTunnelConfig = null;
                 
                 // Cleanup partial tunnel state
                 try { await _networkClient.StopTunnelAsync(); } catch { }
@@ -426,6 +436,10 @@ public class MainViewModel : INotifyPropertyChanged
                 return;
             }
 
+            // Step 5.5: Tunnel readiness settlement
+            _stateMachine.TransitionTo(ConnectionState.StartingTunnel, "Verifying tunnel readiness...");
+            await Task.Delay(800);
+
             // Step 6: Launching Discord
             if (_settings.AutoLaunchDiscord)
             {
@@ -435,10 +449,12 @@ public class MainViewModel : INotifyPropertyChanged
 
             // Step 7: Connected
             _stateMachine.TransitionTo(ConnectionState.Connected, $"Connected to {SelectedServer.Name}");
+            _healthMonitor.StartMonitoring(profile.Wireguard.Endpoint);
         }
         catch (Exception ex)
         {
             _logger.Error("Error during connect sequence", ex);
+            _activeTunnelConfig = null;
             
             // Clean up partial tunnel state
             try { await _networkClient.StopTunnelAsync(); } catch { }
@@ -470,6 +486,9 @@ public class MainViewModel : INotifyPropertyChanged
 
         try
         {
+            _healthMonitor.StopMonitoring();
+            _activeTunnelConfig = null;
+
             _stateMachine.TransitionTo(ConnectionState.Disconnecting, "Disconnecting tunnel...");
             await _networkClient.StopTunnelAsync();
             _stateMachine.TransitionTo(ConnectionState.Disconnected, "Disconnected");
@@ -482,6 +501,74 @@ public class MainViewModel : INotifyPropertyChanged
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    private void OnHealthChanged(object? sender, HealthChangedEventArgs e)
+    {
+        if (!_isConnected) return;
+
+        Application.Current?.Dispatcher.Invoke(() =>
+        {
+            switch (e.Report.State)
+            {
+                case TunnelHealthState.Healthy:
+                    StatusText = "Connected";
+                    StatusDetail = e.Report.MedianLatencyMs.HasValue
+                        ? $"Connected to {SelectedServer?.Name} ({e.Report.MedianLatencyMs} ms)"
+                        : $"Connected to {SelectedServer?.Name}";
+                    break;
+                case TunnelHealthState.Degraded:
+                    StatusText = "Connected";
+                    StatusDetail = e.Report.MedianLatencyMs.HasValue
+                        ? $"Connection degraded ({e.Report.MedianLatencyMs} ms)"
+                        : "Connection degraded";
+                    break;
+                case TunnelHealthState.Recovering:
+                    StatusText = "Reconnecting...";
+                    StatusDetail = e.Report.Message;
+                    break;
+                case TunnelHealthState.Unavailable:
+                    StatusText = "Reconnecting...";
+                    StatusDetail = "Connection lost. Reconnecting...";
+                    break;
+            }
+        });
+    }
+
+    private async Task<bool> PerformTunnelRecoveryAsync()
+    {
+        if (_activeTunnelConfig == null || !_isConnected) return false;
+
+        _logger.Info("[Recovery] Performing clean tunnel self-recovery...");
+        try
+        {
+            // 1. Stop current tunnel instance
+            await _networkClient.StopTunnelAsync();
+
+            // 2. Short backoff
+            await Task.Delay(1500);
+
+            // 3. Verify service
+            var (ok, _) = await _networkClient.VerifyAndRecoverServiceAsync();
+            if (!ok) return false;
+
+            // 4. Restart tunnel with active config
+            var result = await _networkClient.StartTunnelAsync(_activeTunnelConfig);
+            if (!result.Success)
+            {
+                _logger.Warning($"[Recovery] StartTunnel returned failure: {result.Message}");
+                return false;
+            }
+
+            // 5. Readiness settle
+            await Task.Delay(1000);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("[Recovery] Exception during recovery", ex);
+            return false;
         }
     }
 

@@ -47,6 +47,7 @@ public partial class App : Application
         var stateMachine = new ConnectionStateMachine(Logger);
         var networkClient = new NetworkServiceClient(Logger);
         var updateService = new ApplicationUpdateService(Logger);
+        var healthMonitor = new TunnelHealthMonitor(Logger);
         DiagnosticsService = new DiagnosticsService(Logger, networkClient, discordLocator);
 
         ViewModel = new MainViewModel(
@@ -59,7 +60,8 @@ public partial class App : Application
             stateMachine,
             networkClient,
             updateService,
-            DiagnosticsService);
+            DiagnosticsService,
+            healthMonitor);
 
         var mainWindow = new MainWindow(ViewModel);
         mainWindow.Show();

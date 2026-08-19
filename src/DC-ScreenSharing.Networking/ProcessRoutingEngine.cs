@@ -322,7 +322,8 @@ public class ProcessRoutingEngine
                             address = config.Endpoint,
                             port = config.Port,
                             public_key = config.PeerPublicKey,
-                            allowed_ips = allowedIpsList
+                            allowed_ips = allowedIpsList,
+                            persistent_keepalive_interval = 25
                         }
                     },
                     mtu = config.Mtu
