@@ -19,6 +19,7 @@
     <ProjectReference Include="..\..\src\DC-ScreenSharing.NetworkService\DC-ScreenSharing.NetworkService.csproj" />
     <ProjectReference Include="..\..\server\DCSS.ProfileService\DCSS.ProfileService.csproj" />
     <ProjectReference Include="..\..\tools\DCSS.Maintainer\DCSS.Maintainer.csproj" />
+    <ProjectReference Include="..\..\tools\DCSS.ProfileCollector\DCSS.ProfileCollector.csproj" />
     <ProjectReference Include="..\..\src\DC-ScreenSharing.Networking\DC-ScreenSharing.Networking.csproj" />
     <ProjectReference Include="..\..\src\DC-ScreenSharing.Core\DC-ScreenSharing.Core.csproj" />
     <ProjectReference Include="..\..\src\DC-ScreenSharing.Shared\DC-ScreenSharing.Shared.csproj" />
