@@ -105,7 +105,7 @@ public class ServiceStatusResponse
     public DateTime? ConnectedSinceUtc { get; set; }
 
     [JsonPropertyName("serviceVersion")]
-    public string ServiceVersion { get; set; } = "1.0.0";
+    public string ServiceVersion { get; set; } = "1.0.1";
 
     [JsonPropertyName("lastError")]
     public string? LastError { get; set; }

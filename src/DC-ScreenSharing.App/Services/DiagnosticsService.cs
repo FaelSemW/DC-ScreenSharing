@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text.Json;
 using DCScreenSharing.Core.Discord;
 using DCScreenSharing.Networking;
+using DCScreenSharing.Shared;
 using DCScreenSharing.Shared.Logging;
 
 namespace DCScreenSharing.App.Services;
@@ -34,7 +35,7 @@ public class DiagnosticsService
 
             var systemInfo = new
             {
-                appVersion = "1.0.0",
+                appVersion = Constants.CurrentVersion,
                 timestampUtc = DateTime.UtcNow,
                 osVersion = Environment.OSVersion.VersionString,
                 is64BitOS = Environment.Is64BitOperatingSystem,

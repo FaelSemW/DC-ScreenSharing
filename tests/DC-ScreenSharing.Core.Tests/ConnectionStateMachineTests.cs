@@ -26,6 +26,7 @@ public class ConnectionStateMachineTests
     public void ValidTransitions_Succeed()
     {
         Assert.True(_stateMachine.TransitionTo(ConnectionState.Checking));
+        Assert.True(_stateMachine.TransitionTo(ConnectionState.CheckingNetworkService));
         Assert.True(_stateMachine.TransitionTo(ConnectionState.Preparing));
         Assert.True(_stateMachine.TransitionTo(ConnectionState.ClosingDiscord));
         Assert.True(_stateMachine.TransitionTo(ConnectionState.StartingTunnel));

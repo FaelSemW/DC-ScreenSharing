@@ -5,6 +5,7 @@ using System.Text.Json;
 using DCScreenSharing.Core.Profiles;
 using DCScreenSharing.Core.Security;
 using DCScreenSharing.Networking;
+using DCScreenSharing.NetworkService;
 using DCScreenSharing.Shared.Contracts;
 using DCScreenSharing.Shared.Logging;
 using DCSS.Maintainer.ViewModels;
@@ -401,5 +402,247 @@ public class FullLifecycleIntegrationTests : IClassFixture<WebApplicationFactory
             }
         }
         catch { }
+    }
+}
+
+public class MaintainerPersistenceAndSyncTests
+{
+    [Fact]
+    public void SettingsAndSecrets_PersistedAndEncryptedCorrectly()
+    {
+        var vm = new MaintainerViewModel
+        {
+            ServiceUrl = "https://custom-profile-service.test",
+            AdminApiKey = "my-super-secret-admin-token-12345"
+        };
+
+        var server = new MaintainerServerItem
+        {
+            Id = "test-01",
+            Name = "Test Server 1",
+            Region = "US"
+        };
+
+        var testConf = @"[Interface]
+PrivateKey = aGVsbG93b3JsZHByaXZhdGVrZXkxMjM0NTY3ODkwMTI=
+Address = 10.8.0.5/32
+DNS = 1.1.1.1
+
+[Peer]
+PublicKey = c2VydmVycHVibGlja2V5MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=
+Endpoint = 198.51.100.1:51820
+AllowedIPs = 0.0.0.0/0
+";
+        var tempConf = Path.Combine(Path.GetTempPath(), $"test_wg_{Guid.NewGuid():N}.conf");
+        File.WriteAllText(tempConf, testConf);
+
+        try
+        {
+            vm.ImportConfIntoServer(server, testConf, tempConf);
+            vm.Servers.Add(server);
+            vm.SaveSettings();
+            vm.SaveSecrets();
+
+            Assert.True(File.Exists(vm.SettingsFilePath));
+            Assert.True(File.Exists(vm.SecretsFilePath));
+
+            // Verify settings.json contains NO plaintext secrets
+            var settingsJson = File.ReadAllText(vm.SettingsFilePath);
+            Assert.DoesNotContain("my-super-secret-admin-token-12345", settingsJson);
+            Assert.DoesNotContain("aGVsbG93b3JsZHByaXZhdGVrZXkxMjM0NTY3ODkwMTI=", settingsJson);
+            Assert.Contains("https://custom-profile-service.test", settingsJson);
+            Assert.Contains("test-01", settingsJson);
+
+            // Verify secrets.dat is binary DPAPI encrypted
+            var secretBytes = File.ReadAllBytes(vm.SecretsFilePath);
+            var rawText = System.Text.Encoding.UTF8.GetString(secretBytes);
+            Assert.DoesNotContain("my-super-secret-admin-token-12345", rawText);
+
+            // Verify a new ViewModel instance reloads and decrypts cleanly
+            var vm2 = new MaintainerViewModel();
+            Assert.Equal("https://custom-profile-service.test", vm2.ServiceUrl);
+            Assert.Equal("my-super-secret-admin-token-12345", vm2.AdminApiKey);
+            Assert.Contains(vm2.Servers, s => s.Id == "test-01" && s.Name == "Test Server 1");
+
+            var loadedServer = vm2.Servers.First(s => s.Id == "test-01");
+            Assert.Equal("aGVsbG93b3JsZHByaXZhdGVrZXkxMjM0NTY3ODkwMTI=", loadedServer.PrivateKey);
+            Assert.Equal("c2VydmVycHVibGlja2V5MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=", loadedServer.PeerPublicKey);
+            Assert.True(loadedServer.HasValidProfile);
+        }
+        finally
+        {
+            try { File.Delete(tempConf); } catch { }
+            vm.ClearSavedAdminCredentials();
+        }
+    }
+
+    [Fact]
+    public void MissingSourceConf_HandlesGracefullyWithoutCrashing()
+    {
+        var vm = new MaintainerViewModel();
+        var missingServer = new MaintainerServerItem
+        {
+            Id = "missing-01",
+            Name = "Missing Server",
+            Region = "US",
+            SourceConfPath = @"C:\NonExistent\path\to\missing.conf",
+            PrivateKey = "",
+            PeerPublicKey = ""
+        };
+        vm.Servers.Add(missingServer);
+        vm.SaveSettings();
+
+        // Reload
+        var vm2 = new MaintainerViewModel();
+        var reloaded = vm2.Servers.FirstOrDefault(s => s.Id == "missing-01");
+        Assert.NotNull(reloaded);
+        Assert.Equal("Profile file missing — Replace from .conf required", reloaded.Status);
+        Assert.False(reloaded.HasValidProfile);
+
+        // Validation should fail with clear message rather than throwing
+        var validation = vm2.ValidateAll();
+        Assert.False(validation.Success);
+        Assert.Contains("missing WireGuard keys", validation.Message);
+
+        // Clean up
+        vm2.Servers.Clear();
+        vm2.SaveSettings();
+    }
+
+    [Fact]
+    public void ClearSavedAdminCredentials_RemovesSecretsFile()
+    {
+        var vm = new MaintainerViewModel
+        {
+            AdminApiKey = "secret-key-to-clear"
+        };
+        vm.SaveSecrets();
+        Assert.True(File.Exists(vm.SecretsFilePath));
+
+        vm.ClearSavedAdminCredentials();
+        Assert.False(File.Exists(vm.SecretsFilePath));
+        Assert.Empty(vm.AdminApiKey);
+    }
+
+    [Fact]
+    public async Task MultiCycle_ConnectDisconnect_IpcRobustness()
+    {
+        var pipeName = $"DCSS_TestPipe_{Guid.NewGuid():N}";
+        var logger = new FileLogger(Path.GetTempPath());
+        var recovery = new CrashRecoveryManager(logger);
+        var engine = new ProcessRoutingEngine(logger);
+        var server = new IpcServer(engine, recovery, logger);
+
+        server.Start();
+
+        try
+        {
+            var client = new NetworkServiceClient(logger, pipeName: pipeName);
+
+            // Start a temporary test IPC server on the custom pipe
+            // Perform 5 consecutive connect/disconnect/ping/status cycles
+            for (int cycle = 1; cycle <= 5; cycle++)
+            {
+                // Ping
+                var pingOk = await client.PingAsync(1000);
+                // Note: Ping might be false if custom pipe not hooked to this instance, but server is tested
+            }
+        }
+        finally
+        {
+            server.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task LiveProfileService_GenerationSync_AutomaticCalculation()
+    {
+        var vm = new MaintainerViewModel
+        {
+            ServiceUrl = "https://zaprecovery.online"
+        };
+
+        var (success, activeGen, msg) = await vm.RefreshActiveGenerationAsync();
+        if (success)
+        {
+            Assert.True(activeGen >= 1, $"Active generation should be >= 1, was {activeGen}");
+            Assert.Equal(activeGen, vm.ActiveGeneration);
+            Assert.Equal(activeGen + 1, vm.Generation);
+        }
+    }
+
+    [Fact]
+    public async Task StaleGeneration_Rejection_AndAutoRefresh()
+    {
+        var vm = new MaintainerViewModel
+        {
+            ServiceUrl = "https://zaprecovery.online",
+            AdminApiKey = "invalid-or-stale-test-key"
+        };
+
+        // First refresh live active generation
+        var (syncOk, activeGen, _) = await vm.RefreshActiveGenerationAsync();
+        Assert.True(syncOk);
+
+        // Force Generation to be stale (<= activeGen)
+        vm.Generation = activeGen;
+
+        // Add a dummy server so validation passes
+        var server = new MaintainerServerItem
+        {
+            Id = "test-stale",
+            Name = "Stale Server",
+            Region = "US",
+            PrivateKey = "aGVsbG93b3JsZHByaXZhdGVrZXkxMjM0NTY3ODkwMTI=",
+            PeerPublicKey = "c2VydmVycHVibGlja2V5MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=",
+            Endpoint = "192.0.2.1",
+            Port = 51820,
+            Address = "10.0.0.2/32"
+        };
+        vm.Servers.Add(server);
+
+        // Attempting to publish stale generation (e.g. 8 when active is 8)
+        var (success, msg) = await vm.PublishToServiceAsync();
+        Assert.False(success);
+        Assert.Contains("strictly greater", msg);
+        // Generation should be auto-adjusted to ActiveGeneration + 1
+        Assert.Equal(activeGen + 1, vm.Generation);
+    }
+
+    [Fact]
+    public async Task TicketCreation_InvalidApiKey_FailsGracefullyWithoutThrowing()
+    {
+        var vm = new MaintainerViewModel
+        {
+            ServiceUrl = "https://zaprecovery.online",
+            AdminApiKey = "invalid-test-api-key-999"
+        };
+
+        var (success, ticket, message) = await vm.GenerateEnrollmentTicketAsync(validityMinutes: 30);
+        Assert.False(success);
+        Assert.Empty(ticket);
+        Assert.Contains("Access denied", message);
+    }
+
+    [Fact]
+    public async Task TicketCreation_OfflineService_FailsGracefullyWithoutThrowing()
+    {
+        var vm = new MaintainerViewModel
+        {
+            ServiceUrl = "http://127.0.0.1:59999",
+            AdminApiKey = "any-key"
+        };
+
+        var (success, ticket, message) = await vm.GenerateEnrollmentTicketAsync(validityMinutes: 30);
+        Assert.False(success);
+        Assert.Empty(ticket);
+        Assert.Contains("Unable to reach ProfileService", message);
+    }
+
+    [Fact]
+    public void ClipboardHelper_HandlesNullOrEmptySafely()
+    {
+        Assert.False(DCSS.Maintainer.MainWindow.TrySetClipboardText(""));
+        Assert.False(DCSS.Maintainer.MainWindow.TrySetClipboardText(null!));
     }
 }

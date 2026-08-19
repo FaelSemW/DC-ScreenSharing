@@ -2,9 +2,10 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="DCSS Server &amp; Profile Maintainer"
-        Height="720" Width="980"
+        Height="720" Width="1020"
         WindowStartupLocation="CenterScreen"
-        Background="#0F172A" Foreground="#F8FAFC">
+        Background="#0F172A" Foreground="#F8FAFC"
+        Loaded="OnWindowLoaded">
 
     <Window.Resources>
         <SolidColorBrush x:Key="SurfaceBrush" Color="#1E293B" />
@@ -41,13 +42,19 @@
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="DCSS Server &amp; Profile Maintainer" FontSize="20" FontWeight="Bold" />
-                <TextBlock Text="Cryptographic Signing &amp; Remote ProfileService Manager" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0" />
+                <TextBlock Text="Cryptographic Signing &amp; Remote ProfileService Manager (DPAPI Secured)" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="Next Generation:" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{StaticResource TextSecondaryBrush}" />
-                <TextBox Text="{Binding Generation}" Width="60" TextAlignment="Center" Margin="0,0,16,0" />
-                <TextBlock Text="Validity (Days):" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{StaticResource TextSecondaryBrush}" />
-                <TextBox Text="{Binding ValidityDays}" Width="40" TextAlignment="Center" />
+                <Border Background="#1E293B" BorderBrush="#334155" BorderThickness="1" CornerRadius="4" Padding="8,4" Margin="0,0,12,0">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Active Gen: " Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding ActiveGeneration}" FontWeight="Bold" Foreground="#38BDF8" VerticalAlignment="Center" Margin="0,0,12,0" />
+                        <TextBlock Text="Next Gen: " Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding Generation}" FontWeight="Bold" Foreground="#4ADE80" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+                <TextBlock Text="Validity (Days):" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBox Text="{Binding ValidityDays, UpdateSourceTrigger=PropertyChanged}" Width="40" TextAlignment="Center" />
             </StackPanel>
         </Grid>
 
@@ -60,12 +67,24 @@
                     <ColumnDefinition Width="120" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="ProfileService URL:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
-                <TextBox Grid.Column="1" Text="{Binding ServiceUrl}" Margin="0,0,12,0" />
+                <TextBox Grid.Column="1" Text="{Binding ServiceUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0" />
+                
                 <TextBlock Grid.Column="2" Text="Admin API Key:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
-                <TextBox Grid.Column="3" Text="{Binding AdminApiKey}" Margin="0,0,12,0" />
-                <Button Grid.Column="4" Content="Create Activation Code" Click="OnCreateTicketClick" Background="#2563EB" Foreground="White" FontWeight="SemiBold" Padding="14,6" BorderThickness="0" />
+                <Grid Grid.Column="3" Margin="0,0,8,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="AdminApiKeyTextBox" Grid.Column="0" Text="{Binding AdminApiKey, UpdateSourceTrigger=PropertyChanged}" />
+                    <PasswordBox x:Name="AdminApiKeyPasswordBox" Grid.Column="0" PasswordChanged="OnPasswordChanged" Background="#0F172A" Foreground="#F8FAFC" BorderBrush="#475569" Padding="6,4" Visibility="Collapsed" />
+                    <Button Grid.Column="1" x:Name="ToggleKeyVisibilityBtn" Content="👁" Click="OnToggleKeyVisibilityClick" Background="#334155" Foreground="White" Width="28" Padding="0" BorderThickness="0" ToolTip="Toggle Key Masking" />
+                </Grid>
+
+                <Button x:Name="SyncRemoteBtn" Grid.Column="4" Content="Sync Remote" Click="OnSyncRemoteClick" Background="#334155" Foreground="White" Padding="10,6" Margin="0,0,6,0" BorderThickness="0" ToolTip="Refresh Active Generation from Server" />
+                <Button x:Name="CreateTicketBtn" Grid.Column="5" Content="Create Activation Code" Click="OnCreateTicketClick" Background="#2563EB" Foreground="White" FontWeight="SemiBold" Padding="12,6" BorderThickness="0" />
             </Grid>
         </Border>
 
@@ -109,14 +128,16 @@
             <Border Grid.Column="1" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="16">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel DataContext="{Binding SelectedServer}">
-                        <Grid Margin="0,0,0,12">
+                        <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="Server Configuration" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
-                            <Button Grid.Column="1" Content="Replace from .conf..." Click="OnReplaceConfClick" Background="#334155" Foreground="White" Padding="10,4" BorderThickness="0" />
+                            <Button Content="Replace from .conf..." Click="OnReplaceConfClick" Background="#334155" Foreground="White" Padding="10,4" BorderThickness="0" />
                         </Grid>
+
+                        <TextBlock Text="{Binding Status}" Foreground="#38BDF8" FontSize="12" Margin="0,0,0,12" />
 
                         <Grid Margin="0,0,0,10">
                             <Grid.ColumnDefinitions>
@@ -126,9 +147,9 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="Server ID:" VerticalAlignment="Center" />
-                            <TextBox Grid.Column="1" Text="{Binding Id}" Margin="0,0,10,0" />
+                            <TextBox Grid.Column="1" Text="{Binding Id, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" />
                             <TextBlock Grid.Column="2" Text="Region:" VerticalAlignment="Center" />
-                            <TextBox Grid.Column="3" Text="{Binding Region}" />
+                            <TextBox Grid.Column="3" Text="{Binding Region, UpdateSourceTrigger=PropertyChanged}" />
                         </Grid>
 
                         <Grid Margin="0,0,0,10">
@@ -137,10 +158,19 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="Display Name:" VerticalAlignment="Center" />
-                            <TextBox Grid.Column="1" Text="{Binding Name}" />
+                            <TextBox Grid.Column="1" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
                         </Grid>
 
-                        <CheckBox Content="Server Enabled in Catalog" IsChecked="{Binding Enabled}" Foreground="White" Margin="110,0,0,16" />
+                        <CheckBox Content="Server Enabled in Catalog" IsChecked="{Binding Enabled}" Foreground="White" Margin="110,0,0,12" />
+
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Source .conf Path:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
+                            <TextBox Grid.Column="1" Text="{Binding SourceConfPath, Mode=OneWay}" IsReadOnly="True" Foreground="{StaticResource TextSecondaryBrush}" />
+                        </Grid>
 
                         <TextBlock Text="WireGuard Tunnel Settings" FontWeight="Bold" FontSize="13" Margin="0,0,0,8" />
 
@@ -152,9 +182,9 @@
                                 <ColumnDefinition Width="80" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="Endpoint IP/Host:" VerticalAlignment="Center" />
-                            <TextBox Grid.Column="1" Text="{Binding Endpoint}" Margin="0,0,10,0" />
+                            <TextBox Grid.Column="1" Text="{Binding Endpoint, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" />
                             <TextBlock Grid.Column="2" Text="Port:" VerticalAlignment="Center" />
-                            <TextBox Grid.Column="3" Text="{Binding Port}" />
+                            <TextBox Grid.Column="3" Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" />
                         </Grid>
 
                         <Grid Margin="0,0,0,10">
@@ -163,7 +193,7 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="Client Address:" VerticalAlignment="Center" />
-                            <TextBox Grid.Column="1" Text="{Binding Address}" />
+                            <TextBox Grid.Column="1" Text="{Binding Address, UpdateSourceTrigger=PropertyChanged}" />
                         </Grid>
 
                         <Grid Margin="0,0,0,10">
@@ -172,7 +202,7 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="Peer Public Key:" VerticalAlignment="Center" />
-                            <TextBox Grid.Column="1" Text="{Binding PeerPublicKey}" />
+                            <TextBox Grid.Column="1" Text="{Binding PeerPublicKey, UpdateSourceTrigger=PropertyChanged}" />
                         </Grid>
 
                         <Grid Margin="0,0,0,10">
@@ -181,7 +211,7 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="Private Key:" VerticalAlignment="Center" />
-                            <TextBox Grid.Column="1" Text="{Binding PrivateKey}" Margin="0,0,6,0" />
+                            <TextBox Grid.Column="1" Text="{Binding PrivateKey, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,6,0" />
                         </Grid>
                     </StackPanel>
                 </ScrollViewer>
@@ -196,9 +226,9 @@
             </Grid.ColumnDefinitions>
             <TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
             <StackPanel Grid.Column="1" Orientation="Horizontal">
-                <Button Content="Key Manager..." Click="OnKeyManagerClick" Background="#334155" Foreground="White" Padding="12,8" Margin="0,0,8,0" BorderThickness="0" />
-                <Button Content="Rollback Prev Gen..." Click="OnRollbackClick" Background="#EF4444" Foreground="White" Padding="12,8" Margin="0,0,8,0" BorderThickness="0" />
-                <Button Content="Publish to ProfileService" Click="OnPublishToServiceClick" Background="{StaticResource AccentBrush}" Foreground="White" FontWeight="Bold" Padding="16,8" BorderThickness="0" />
+                <Button x:Name="KeyManagerBtn" Content="Key &amp; Security Manager..." Click="OnKeyManagerClick" Background="#334155" Foreground="White" Padding="12,8" Margin="0,0,8,0" BorderThickness="0" />
+                <Button x:Name="RollbackBtn" Content="Rollback Prev Gen..." Click="OnRollbackClick" Background="#EF4444" Foreground="White" Padding="12,8" Margin="0,0,8,0" BorderThickness="0" />
+                <Button x:Name="PublishBtn" Content="Publish to ProfileService" Click="OnPublishToServiceClick" Background="{StaticResource AccentBrush}" Foreground="White" FontWeight="Bold" Padding="16,8" BorderThickness="0" />
             </StackPanel>
         </Grid>
     </Grid>

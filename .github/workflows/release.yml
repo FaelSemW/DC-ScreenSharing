@@ -44,6 +44,7 @@ jobs:
         with:
           files: |
             dist/installer/DC-ScreenSharing-Setup-${{ steps.get_version.outputs.VERSION }}.exe
+            dist/installer/DC-ScreenSharing-Setup-${{ steps.get_version.outputs.VERSION }}.exe.sha256
             dist/installer/SHA256SUMS.txt
           generate_release_notes: true
           draft: false

@@ -16,8 +16,9 @@ public class IpcServer
     private readonly ProcessRoutingEngine _engine;
     private readonly CrashRecoveryManager _recovery;
     private readonly IAppLogger _logger;
-    private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource? _cts;
     private Task? _serverTask;
+    private readonly object _serverLock = new();
 
     private bool _isConnected;
     private string? _activeServerId;
@@ -34,26 +35,46 @@ public class IpcServer
 
     public void Start()
     {
-        _serverTask = Task.Run(() => ListenLoopAsync(_cts.Token));
-        _logger.Info($"IPC Server started listening on pipe: {Constants.PipeName}");
+        lock (_serverLock)
+        {
+            if (_cts != null && !_cts.IsCancellationRequested)
+            {
+                _logger.Info("IPC Server is already listening.");
+                return;
+            }
+
+            _cts = new CancellationTokenSource();
+            _serverTask = Task.Run(() => ListenLoopAsync(_cts.Token));
+            _logger.Info($"IPC Server started listening on pipe: {Constants.PipeName}");
+        }
     }
 
     public void Stop()
     {
-        _cts.Cancel();
-        _engine.Stop();
-        _recovery.ClearState();
-        _logger.Info("IPC Server stopped.");
+        lock (_serverLock)
+        {
+            try
+            {
+                _cts?.Cancel();
+            }
+            catch { }
+
+            _engine.Stop();
+            _recovery.ClearState();
+            _isConnected = false;
+            _logger.Info("IPC Server stopped.");
+        }
     }
 
     private async Task ListenLoopAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
+            NamedPipeServerStream? pipeServer = null;
             try
             {
                 var pipeSecurity = CreateSecurePipeSecurity();
-                var pipeServer = NamedPipeServerStreamAcl.Create(
+                pipeServer = NamedPipeServerStreamAcl.Create(
                     Constants.PipeName,
                     PipeDirection.InOut,
                     NamedPipeServerStream.MaxAllowedServerInstances,
@@ -64,16 +85,32 @@ public class IpcServer
                     pipeSecurity);
 
                 await pipeServer.WaitForConnectionAsync(ct);
-                _ = Task.Run(() => HandleClientAsync(pipeServer, ct), ct);
+
+                // Transfer ownership of pipeServer to worker task
+                var activePipe = pipeServer;
+                pipeServer = null;
+                _ = Task.Run(() => HandleClientAsync(activePipe, ct), ct);
             }
             catch (OperationCanceledException)
             {
+                pipeServer?.Dispose();
                 break;
             }
             catch (Exception ex)
             {
-                _logger.Warning($"Error accepting pipe connection: {ex.Message}");
-                await Task.Delay(500, ct);
+                pipeServer?.Dispose();
+                if (!ct.IsCancellationRequested)
+                {
+                    _logger.Warning($"Error accepting pipe connection: {ex.Message}");
+                    try
+                    {
+                        await Task.Delay(500, ct);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -159,7 +196,7 @@ public class IpcServer
                     ActiveServerId = _activeServerId,
                     ActiveServerName = _activeServerName,
                     ConnectedSinceUtc = _connectedSinceUtc,
-                    ServiceVersion = "1.0.0",
+                    ServiceVersion = Constants.CurrentVersion,
                     LastError = _lastError
                 };
                 response.PayloadJson = JsonSerializer.Serialize(status);
@@ -287,7 +324,7 @@ public class IpcServer
     {
         return new DiagnosticsData
         {
-            ServiceVersion = "1.0.0",
+            ServiceVersion = Constants.CurrentVersion,
             OsVersion = Environment.OSVersion.VersionString,
             Is64Bit = Environment.Is64BitOperatingSystem,
             TunnelActive = _isConnected && _engine.IsRunning,

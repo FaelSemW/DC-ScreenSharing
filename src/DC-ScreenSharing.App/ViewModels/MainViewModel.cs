@@ -10,6 +10,7 @@ using DCScreenSharing.Core.Settings;
 using DCScreenSharing.Core.State;
 using DCScreenSharing.Core.Updates;
 using DCScreenSharing.Networking;
+using DCScreenSharing.Shared;
 using DCScreenSharing.Shared.Contracts;
 using DCScreenSharing.Shared.Logging;
 
@@ -335,10 +336,11 @@ public class MainViewModel : INotifyPropertyChanged
 
         ErrorMessage = null;
         IsBusy = true;
+        var wasDiscordRunning = false;
 
         try
         {
-            // Step 1: Checking
+            // Step 1: Checking Discord
             _stateMachine.TransitionTo(ConnectionState.Checking, "Checking Discord installation...");
             RefreshDiscord();
             if (_detectedDiscord == null)
@@ -348,7 +350,18 @@ public class MainViewModel : INotifyPropertyChanged
                 return;
             }
 
-            // Step 2: Preparing Profile
+            // Step 2: Checking NetworkService (Before closing Discord)
+            _stateMachine.TransitionTo(ConnectionState.CheckingNetworkService, "Verifying DCSS.NetworkService...");
+            var (serviceOk, serviceMsg) = await _networkClient.VerifyAndRecoverServiceAsync();
+            if (!serviceOk)
+            {
+                ErrorMessage = serviceMsg;
+                _logger.Error($"Network service pre-check failed: {serviceMsg}");
+                _stateMachine.TransitionTo(ConnectionState.Error, serviceMsg);
+                return;
+            }
+
+            // Step 3: Preparing Profile
             _stateMachine.TransitionTo(ConnectionState.Preparing, "Preparing secure server profile...");
             var profile = await _profileCoordinator.GetOrRefreshProfileAsync(SelectedServer.Id);
             
@@ -364,10 +377,11 @@ public class MainViewModel : INotifyPropertyChanged
                 return;
             }
 
-            // Step 3: Closing Discord if running
-            if (_detectedDiscord.IsRunning)
+            // Step 4: Closing Discord if running
+            wasDiscordRunning = _detectedDiscord.IsRunning;
+            if (wasDiscordRunning)
             {
-                _stateMachine.TransitionTo(ConnectionState.ClosingDiscord, "Closing active Discord instance...");
+                _stateMachine.TransitionTo(ConnectionState.ClosingDiscord, $"Closing active Discord instance ({_detectedDiscord.Flavor})...");
                 var closed = await _discordProcessManager.CloseDiscordGracefullyAsync(_detectedDiscord);
                 if (!closed)
                 {
@@ -375,7 +389,7 @@ public class MainViewModel : INotifyPropertyChanged
                 }
             }
 
-            // Step 4: Starting Tunnel via NetworkService IPC
+            // Step 5: Starting Tunnel via NetworkService IPC
             _stateMachine.TransitionTo(ConnectionState.StartingTunnel, "Starting network tunnel...");
             var tunnelConfig = new TunnelConfiguration
             {
@@ -395,25 +409,52 @@ public class MainViewModel : INotifyPropertyChanged
             var tunnelResult = await _networkClient.StartTunnelAsync(tunnelConfig);
             if (!tunnelResult.Success)
             {
+                _logger.Error($"StartTunnel failed: {tunnelResult.Message}. Performing clean recovery...");
+                
+                // Cleanup partial tunnel state
+                try { await _networkClient.StopTunnelAsync(); } catch { }
+
+                // Relaunch Discord if it was running before
+                if (wasDiscordRunning)
+                {
+                    _logger.Info($"Restoring previously detected Discord ({_detectedDiscord.Flavor})...");
+                    _discordProcessManager.LaunchDiscord(_detectedDiscord);
+                }
+
                 ErrorMessage = $"Network service error: {tunnelResult.Message}";
                 _stateMachine.TransitionTo(ConnectionState.Error, tunnelResult.Message);
                 return;
             }
 
-            // Step 5: Launching Discord
+            // Step 6: Launching Discord
             if (_settings.AutoLaunchDiscord)
             {
-                _stateMachine.TransitionTo(ConnectionState.LaunchingDiscord, "Launching Discord with tunnel route...");
+                _stateMachine.TransitionTo(ConnectionState.LaunchingDiscord, $"Launching Discord ({_detectedDiscord.Flavor}) with tunnel route...");
                 _discordProcessManager.LaunchDiscord(_detectedDiscord);
             }
 
-            // Step 6: Connected
+            // Step 7: Connected
             _stateMachine.TransitionTo(ConnectionState.Connected, $"Connected to {SelectedServer.Name}");
         }
         catch (Exception ex)
         {
             _logger.Error("Error during connect sequence", ex);
-            ErrorMessage = "Connection failed. Please check logs for details.";
+            
+            // Clean up partial tunnel state
+            try { await _networkClient.StopTunnelAsync(); } catch { }
+
+            // Restore Discord if it was closed during sequence
+            if (wasDiscordRunning && _detectedDiscord != null)
+            {
+                try
+                {
+                    _logger.Info($"Restoring previously detected Discord ({_detectedDiscord.Flavor}) after exception...");
+                    _discordProcessManager.LaunchDiscord(_detectedDiscord);
+                }
+                catch { }
+            }
+
+            ErrorMessage = $"Connection failed: {ex.Message}";
             _stateMachine.TransitionTo(ConnectionState.Error, ex.Message);
         }
         finally
@@ -460,7 +501,7 @@ public class MainViewModel : INotifyPropertyChanged
     {
         try
         {
-            var result = await _updateService.CheckForUpdatesAsync(new Version(1, 0, 0));
+            var result = await _updateService.CheckForUpdatesAsync(Version.Parse(Constants.CurrentVersion));
             if (result.UpdateAvailable)
             {
                 _logger.Info($"Application update available: v{result.LatestVersion}");

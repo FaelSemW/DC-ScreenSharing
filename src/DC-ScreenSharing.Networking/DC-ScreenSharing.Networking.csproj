@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
     <ProjectReference Include="..\DC-ScreenSharing.Shared\DC-ScreenSharing.Shared.csproj" />
     <ProjectReference Include="..\DC-ScreenSharing.Core\DC-ScreenSharing.Core.csproj" />
   </ItemGroup>

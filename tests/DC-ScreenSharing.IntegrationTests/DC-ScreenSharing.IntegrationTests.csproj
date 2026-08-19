@@ -15,8 +15,8 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
   </ItemGroup>
-
   <ItemGroup>
+    <ProjectReference Include="..\..\src\DC-ScreenSharing.NetworkService\DC-ScreenSharing.NetworkService.csproj" />
     <ProjectReference Include="..\..\server\DCSS.ProfileService\DCSS.ProfileService.csproj" />
     <ProjectReference Include="..\..\tools\DCSS.Maintainer\DCSS.Maintainer.csproj" />
     <ProjectReference Include="..\..\src\DC-ScreenSharing.Networking\DC-ScreenSharing.Networking.csproj" />

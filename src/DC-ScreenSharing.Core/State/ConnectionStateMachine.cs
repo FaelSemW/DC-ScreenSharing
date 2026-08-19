@@ -6,15 +6,16 @@ public enum ConnectionState
 {
     Disconnected = 0,
     Checking = 1,
-    Preparing = 2,
-    ClosingDiscord = 3,
-    StartingTunnel = 4,
-    LaunchingDiscord = 5,
-    Connecting = 6,
-    Connected = 7,
-    Disconnecting = 8,
-    Updating = 9,
-    Error = 10
+    CheckingNetworkService = 2,
+    Preparing = 3,
+    ClosingDiscord = 4,
+    StartingTunnel = 5,
+    LaunchingDiscord = 6,
+    Connecting = 7,
+    Connected = 8,
+    Disconnecting = 9,
+    Updating = 10,
+    Error = 11
 }
 
 public class StateChangedEventArgs : EventArgs
@@ -87,7 +88,8 @@ public class ConnectionStateMachine
         return from switch
         {
             ConnectionState.Disconnected => to is ConnectionState.Checking or ConnectionState.Preparing or ConnectionState.Updating,
-            ConnectionState.Checking => to is ConnectionState.Preparing or ConnectionState.Disconnected or ConnectionState.Updating,
+            ConnectionState.Checking => to is ConnectionState.CheckingNetworkService or ConnectionState.Preparing or ConnectionState.Disconnected or ConnectionState.Updating,
+            ConnectionState.CheckingNetworkService => to is ConnectionState.Preparing or ConnectionState.Disconnected or ConnectionState.Updating,
             ConnectionState.Preparing => to is ConnectionState.ClosingDiscord or ConnectionState.StartingTunnel or ConnectionState.Disconnected,
             ConnectionState.ClosingDiscord => to is ConnectionState.StartingTunnel or ConnectionState.Disconnected,
             ConnectionState.StartingTunnel => to is ConnectionState.LaunchingDiscord or ConnectionState.Connecting or ConnectionState.Disconnecting,
@@ -105,6 +107,7 @@ public class ConnectionStateMachine
     {
         ConnectionState.Disconnected => "Disconnected",
         ConnectionState.Checking => "Checking system...",
+        ConnectionState.CheckingNetworkService => "Verifying network service...",
         ConnectionState.Preparing => "Preparing server profile...",
         ConnectionState.ClosingDiscord => "Closing Discord...",
         ConnectionState.StartingTunnel => "Starting network tunnel...",

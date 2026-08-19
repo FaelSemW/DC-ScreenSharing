@@ -279,7 +279,7 @@ public class ProcessRoutingEngine
         {
             log = new
             {
-                level = "info",
+                level = "warn",
                 timestamp = true
             },
             dns = new

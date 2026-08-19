@@ -1,6 +1,6 @@
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.0.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -99,6 +99,7 @@ if (Test-Path $iscc) {
         $hash = (Get-FileHash $setupExe -Algorithm SHA256).Hash.ToLowerInvariant()
         $checksumContent = "$hash  DC-ScreenSharing-Setup-$Version.exe"
         Set-Content -Path (Join-Path $installerDir "SHA256SUMS.txt") -Value $checksumContent
+        Set-Content -Path (Join-Path $installerDir "DC-ScreenSharing-Setup-$Version.exe.sha256") -Value $checksumContent
         Write-Host "==================================================" -ForegroundColor Green
         Write-Host "Installer built successfully: $setupExe" -ForegroundColor Green
         Write-Host "SHA256: $hash" -ForegroundColor Cyan

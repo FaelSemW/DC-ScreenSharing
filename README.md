@@ -32,10 +32,10 @@ The solution consists of the following components:
 dotnet test
 
 # Build and package production installer
-powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Configuration Release -Version 1.0.0
+powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Configuration Release -Version 1.0.1
 ```
 
-The compiled installer is output to `dist/installer/DC-ScreenSharing-Setup-1.0.0.exe`.
+The compiled installer is output to `dist/installer/DC-ScreenSharing-Setup-1.0.1.exe`.
 
 ## ProfileService Development Setup
 

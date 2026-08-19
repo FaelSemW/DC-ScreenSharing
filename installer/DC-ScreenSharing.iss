@@ -1,7 +1,7 @@
 #define MyAppName "DC-ScreenSharing"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "DC-ScreenSharing Team"
-#define MyAppURL "https://github.com/DC-ScreenSharing/DC-ScreenSharing"
+#define MyAppURL "https://github.com/FaelSemW/DC-ScreenSharing"
 #define MyAppExeName "DC-ScreenSharing.exe"
 
 [Setup]
@@ -43,8 +43,9 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-; Install and start the Network Service
+; Install and configure the Network Service as Automatic and start it
 Filename: "sc.exe"; Parameters: "create DCSS.NetworkService binPath= ""{app}\DCSS.NetworkService.exe"" start= auto displayname= ""DC-ScreenSharing Network Service"""; Flags: runhidden
+Filename: "sc.exe"; Parameters: "config DCSS.NetworkService binPath= ""{app}\DCSS.NetworkService.exe"" start= auto"; Flags: runhidden
 Filename: "sc.exe"; Parameters: "description DCSS.NetworkService ""Provides privileged application-specific routing for DC-ScreenSharing."""; Flags: runhidden
 Filename: "sc.exe"; Parameters: "start DCSS.NetworkService"; Flags: runhidden
 ; Run main application after setup
@@ -53,3 +54,14 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 [UninstallRun]
 Filename: "sc.exe"; Parameters: "stop DCSS.NetworkService"; Flags: runhidden
 Filename: "sc.exe"; Parameters: "delete DCSS.NetworkService"; Flags: runhidden
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  // Stop existing service if running so binaries can be overwritten cleanly
+  Exec('sc.exe', 'stop DCSS.NetworkService', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(1000);
+  Result := '';
+end;

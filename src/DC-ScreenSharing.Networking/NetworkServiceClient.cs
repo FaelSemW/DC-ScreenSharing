@@ -1,9 +1,11 @@
 using System.IO.Pipes;
+using System.ServiceProcess;
 using System.Text;
 using System.Text.Json;
 using DCScreenSharing.Shared;
 using DCScreenSharing.Shared.Contracts;
 using DCScreenSharing.Shared.Logging;
+using TimeoutException = System.TimeoutException;
 
 namespace DCScreenSharing.Networking;
 
@@ -29,6 +31,204 @@ public class NetworkServiceClient
         catch
         {
             return false;
+        }
+    }
+
+    public async Task<(bool IsHealthy, string Message)> VerifyAndRecoverServiceAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            // 1. Fast path: check if named pipe is already responsive
+            if (await PingAsync(1500, ct))
+            {
+                _logger.Info("Network service IPC pipe is reachable and responsive.");
+                return (true, "Network service is online.");
+            }
+
+            // 2. Query Windows Service Control Manager for DCSS.NetworkService
+            ServiceController? sc = null;
+            try
+            {
+                sc = new ServiceController(Constants.ServiceName);
+                _ = sc.Status; // Throws if service is not registered
+            }
+            catch (InvalidOperationException)
+            {
+                _logger.Error($"Windows service '{Constants.ServiceName}' is not registered with SCM.");
+                return (false, "DC-ScreenSharing Network Service is not installed. Please install or repair the application.");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Could not inspect service '{Constants.ServiceName}' status: {ex.Message}");
+            }
+
+            if (sc != null)
+            {
+                using (sc)
+                {
+                    _logger.Info($"Service '{Constants.ServiceName}' status: {sc.Status}");
+
+                    if (sc.Status != ServiceControllerStatus.Running)
+                    {
+                        _logger.Info($"Service '{Constants.ServiceName}' is {sc.Status}. Attempting controlled startup...");
+                        var startOk = await AttemptStartServiceAsync(sc);
+                        if (!startOk)
+                        {
+                            _logger.Warning("Standard service start failed, attempting elevated start via sc.exe...");
+                            await StartServiceElevatedAsync();
+                        }
+
+                        var running = await WaitForServiceStatusAsync(sc, ServiceControllerStatus.Running, TimeSpan.FromSeconds(10));
+                        if (!running)
+                        {
+                            return (false, $"Unable to start '{Constants.ServiceName}'. Service state is {sc.Status}.");
+                        }
+                    }
+                    else
+                    {
+                        // Service is in Running state, but named pipe ping failed earlier.
+                        // Perform one controlled service restart.
+                        _logger.Warning($"Service '{Constants.ServiceName}' is marked Running, but IPC pipe is unreachable. Attempting one controlled restart...");
+                        var restartOk = await AttemptRestartServiceAsync(sc);
+                        if (!restartOk)
+                        {
+                            _logger.Warning("Standard service restart failed, attempting elevated restart via sc.exe...");
+                            await RestartServiceElevatedAsync();
+                        }
+
+                        var running = await WaitForServiceStatusAsync(sc, ServiceControllerStatus.Running, TimeSpan.FromSeconds(10));
+                        if (!running)
+                        {
+                            return (false, $"Service recovery restart failed. Service state is {sc.Status}.");
+                        }
+                    }
+                }
+            }
+
+            // 3. Post-recovery verify named pipe ping
+            for (int i = 0; i < 6; i++)
+            {
+                if (await PingAsync(1500, ct))
+                {
+                    _logger.Info("Network service IPC pipe successfully verified after recovery.");
+                    return (true, "Network service is online.");
+                }
+                await Task.Delay(500, ct);
+            }
+
+            return (false, "DCSS.NetworkService is running but not responding on IPC pipe. Please check service logs or restart the service.");
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Unexpected error during network service health check", ex);
+            return (false, $"Network service health check failed: {ex.Message}");
+        }
+    }
+
+    private async Task<bool> AttemptStartServiceAsync(ServiceController sc)
+    {
+        try
+        {
+            sc.Refresh();
+            if (sc.Status == ServiceControllerStatus.Running) return true;
+            sc.Start();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.Warning($"AttemptStartServiceAsync failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    private async Task<bool> AttemptRestartServiceAsync(ServiceController sc)
+    {
+        try
+        {
+            sc.Refresh();
+            if (sc.CanStop)
+            {
+                sc.Stop();
+                await WaitForServiceStatusAsync(sc, ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(5));
+            }
+            sc.Start();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.Warning($"AttemptRestartServiceAsync failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static async Task<bool> WaitForServiceStatusAsync(ServiceController sc, ServiceControllerStatus desired, TimeSpan timeout)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.Elapsed < timeout)
+        {
+            try
+            {
+                sc.Refresh();
+                if (sc.Status == desired) return true;
+            }
+            catch { }
+            await Task.Delay(300);
+        }
+        try { sc.Refresh(); return sc.Status == desired; } catch { return false; }
+    }
+
+    private async Task StartServiceElevatedAsync()
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "sc.exe",
+                Arguments = $"start {Constants.ServiceName}",
+                UseShellExecute = true,
+                CreateNoWindow = true,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc != null) await proc.WaitForExitAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.Warning($"Elevated sc.exe start note: {ex.Message}");
+        }
+    }
+
+    private async Task RestartServiceElevatedAsync()
+    {
+        try
+        {
+            var psiStop = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "sc.exe",
+                Arguments = $"stop {Constants.ServiceName}",
+                UseShellExecute = true,
+                CreateNoWindow = true,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
+            };
+            using var stopProc = System.Diagnostics.Process.Start(psiStop);
+            if (stopProc != null) await stopProc.WaitForExitAsync();
+
+            await Task.Delay(1000);
+
+            var psiStart = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "sc.exe",
+                Arguments = $"start {Constants.ServiceName}",
+                UseShellExecute = true,
+                CreateNoWindow = true,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
+            };
+            using var startProc = System.Diagnostics.Process.Start(psiStart);
+            if (startProc != null) await startProc.WaitForExitAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.Warning($"Elevated sc.exe restart note: {ex.Message}");
         }
     }
 

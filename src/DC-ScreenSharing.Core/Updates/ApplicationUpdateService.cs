@@ -43,8 +43,8 @@ public class GitHubReleaseResponse
 public class UpdateCheckResult
 {
     public bool UpdateAvailable { get; set; }
-    public Version CurrentVersion { get; set; } = new(1, 0, 0);
-    public Version LatestVersion { get; set; } = new(1, 0, 0);
+    public Version CurrentVersion { get; set; } = new(1, 0, 1);
+    public Version LatestVersion { get; set; } = new(1, 0, 1);
     public string ReleaseNotes { get; set; } = string.Empty;
     public string? DownloadUrl { get; set; }
     public string? ChecksumUrl { get; set; }
