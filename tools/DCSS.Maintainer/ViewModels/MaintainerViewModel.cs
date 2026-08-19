@@ -537,7 +537,7 @@ public class MaintainerViewModel : INotifyPropertyChanged
                 {
                     var activeGen = genProp.GetInt32();
                     ActiveGeneration = activeGen;
-                    if (updateNextGeneration || Generation <= activeGen)
+                    if (updateNextGeneration)
                     {
                         Generation = activeGen + 1;
                     }
@@ -556,11 +556,11 @@ public class MaintainerViewModel : INotifyPropertyChanged
                 if (catalog != null)
                 {
                     ActiveGeneration = catalog.Generation;
-                    if (updateNextGeneration || Generation <= catalog.Generation)
+                    if (updateNextGeneration)
                     {
                         Generation = catalog.Generation + 1;
                     }
-                    StatusMessage = $"ProfileService online. Active Generation: {catalog.Generation}, Next Generation: {catalog.Generation + 1}";
+                    StatusMessage = $"Catalog online. Active Generation: {catalog.Generation}, Next Generation: {catalog.Generation + 1}";
                     return (true, catalog.Generation, StatusMessage);
                 }
             }
