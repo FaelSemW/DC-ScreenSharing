@@ -1,5 +1,5 @@
 #define MyAppName "DC-ScreenSharing"
-#define MyAppVersion "1.0.7-rc1"
+#define MyAppVersion "1.0.7"
 #define MyAppPublisher "DC-ScreenSharing Team"
 #define MyAppURL "https://github.com/FaelSemW/DC-ScreenSharing"
 #define MyAppExeName "DC-ScreenSharing.exe"
@@ -37,6 +37,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "..\dist\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
@@ -44,22 +45,19 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-; 1. Install and start the WFP Callout Kernel Driver
-Filename: "sc.exe"; Parameters: "create DCSS.WfpCallout type= kernel binPath= ""{app}\driver\DCSS.WfpCallout.sys"" DisplayName= ""DC-ScreenSharing WFP Callout Driver"""; Flags: runhidden
-Filename: "sc.exe"; Parameters: "start DCSS.WfpCallout"; Flags: runhidden
-
-; 2. Install, configure, and start the Network Service as Automatic
+; 1. Install, configure, and start the Network Service as Automatic
 Filename: "sc.exe"; Parameters: "create DCSS.NetworkService binPath= ""{app}\DCSS.NetworkService.exe"" start= auto displayname= ""DC-ScreenSharing Network Service"""; Flags: runhidden
 Filename: "sc.exe"; Parameters: "config DCSS.NetworkService binPath= ""{app}\DCSS.NetworkService.exe"" start= auto"; Flags: runhidden
 Filename: "sc.exe"; Parameters: "description DCSS.NetworkService ""Provides privileged application-specific routing for DC-ScreenSharing."""; Flags: runhidden
 Filename: "sc.exe"; Parameters: "start DCSS.NetworkService"; Flags: runhidden
 
-; 3. Run main application after setup
+; 2. Run main application after setup
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "sc.exe"; Parameters: "stop DCSS.NetworkService"; Flags: runhidden
 Filename: "sc.exe"; Parameters: "delete DCSS.NetworkService"; Flags: runhidden
+; Clean up any legacy driver if present
 Filename: "sc.exe"; Parameters: "stop DCSS.WfpCallout"; Flags: runhidden
 Filename: "sc.exe"; Parameters: "delete DCSS.WfpCallout"; Flags: runhidden
 
@@ -71,11 +69,12 @@ begin
   // Stop existing services and processes so binaries can be overwritten cleanly
   Exec('sc.exe', 'stop DCSS.NetworkService', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('sc.exe', 'stop DCSS.WfpCallout', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('sc.exe', 'delete DCSS.WfpCallout', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('taskkill.exe', '/F /IM DCSS.NetworkService.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('taskkill.exe', '/F /IM DC-ScreenSharing.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('taskkill.exe', '/F /IM dcss-engine.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM openvpn.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(1000);
 
   Result := '';
 end;
-

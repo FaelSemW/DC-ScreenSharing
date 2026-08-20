@@ -9,14 +9,14 @@ using Xunit;
 
 namespace DC_ScreenSharing.IntegrationTests;
 
-public class AdminWebsiteTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public class AdminWebsiteTests : IClassFixture<WebApplicationFactory<global::Program>>, IDisposable
 {
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly WebApplicationFactory<global::Program> _factory;
     private readonly HttpClient _client;
     private readonly string _testStorageDir;
     private const string TestAdminApiKey = "test-admin-secret-key-12345";
 
-    public AdminWebsiteTests(WebApplicationFactory<Program> factory)
+    public AdminWebsiteTests(WebApplicationFactory<global::Program> factory)
     {
         _testStorageDir = Path.Combine(Path.GetTempPath(), "DCSS_AdminTest_" + Guid.NewGuid().ToString("N"));
         Environment.SetEnvironmentVariable("ProfileService__StoragePath", _testStorageDir);

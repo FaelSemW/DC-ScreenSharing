@@ -1,6 +1,6 @@
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "1.0.7-rc1",
+    [string]$Version = "1.0.7",
     [int]$StageTimeoutSeconds = 300
 )
 
@@ -107,10 +107,10 @@ Write-Host "==================================================" -ForegroundColor
 
 # [1/7] Clean
 Write-Host ">>> START [1/7] Clean Distribution Directories" -ForegroundColor Cyan
-if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
-if (Test-Path $installerDir) { Remove-Item $installerDir -Recurse -Force }
-if (Test-Path $maintainerDir) { Remove-Item $maintainerDir -Recurse -Force }
-if (Test-Path $collectorDir) { Remove-Item $collectorDir -Recurse -Force }
+if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force -ErrorAction SilentlyContinue }
+if (Test-Path $installerDir) { Remove-Item $installerDir -Recurse -Force -ErrorAction SilentlyContinue }
+if (Test-Path $maintainerDir) { Remove-Item $maintainerDir -Recurse -Force -ErrorAction SilentlyContinue }
+if (Test-Path $collectorDir) { Remove-Item $collectorDir -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
 New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
 New-Item -ItemType Directory -Force -Path $maintainerDir | Out-Null
@@ -170,7 +170,7 @@ Invoke-StepWithTimeout -StageName "[5/7b] Publish DCSS.ProfileCollector" `
     -ArgumentList @("publish", (Join-Path $repoRoot "tools\DCSS.ProfileCollector\DCSS.ProfileCollector.csproj"), "-c", $Configuration, "-r", "win-x64", "--self-contained", "true", "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true", "-o", $collectorDir) `
     -TimeoutSec 180
 
-# Deploy native runtime files
+# Deploy native runtime files (WinDivert + Wintun + WireGuard)
 $nativeTarget = Join-Path $publishDir "native"
 New-Item -ItemType Directory -Force -Path $nativeTarget | Out-Null
 $nativeSource = Join-Path $repoRoot "runtimes\win-x64\native"
@@ -178,38 +178,27 @@ if (Test-Path $nativeSource) {
     Copy-Item "$nativeSource\*" $nativeTarget -Force
 }
 
-# Deploy WFP Driver Package
-$driverTarget = Join-Path $publishDir "driver"
-New-Item -ItemType Directory -Force -Path $driverTarget | Out-Null
-
-$driverScript = Join-Path $repoRoot "scripts\build-driver.ps1"
-if (Test-Path $driverScript) {
-    & powershell.exe -ExecutionPolicy Bypass -File $driverScript -Configuration $Configuration -Platform x64
+# Deploy OpenVPN runtime files
+$openvpnTarget = Join-Path $publishDir "openvpn"
+New-Item -ItemType Directory -Force -Path $openvpnTarget | Out-Null
+$openvpnSource = Join-Path $repoRoot "runtimes\win-x64\openvpn"
+if (Test-Path $openvpnSource) {
+    Copy-Item "$openvpnSource\*" $openvpnTarget -Force
 }
 
-$driverSourceDir = Join-Path $repoRoot "native\DCSS.WfpCallout\x64\$Configuration"
-$pkgSourceDir = Join-Path $repoRoot "native\DCSS.WfpCallout\pkg\x64\$Configuration"
-
-if (Test-Path "$driverSourceDir\DCSS.WfpCallout.sys") {
-    Copy-Item "$driverSourceDir\DCSS.WfpCallout.sys" $driverTarget -Force
-}
-if (Test-Path "$pkgSourceDir\DCSS.WfpCallout.inf") {
-    Copy-Item "$pkgSourceDir\DCSS.WfpCallout.inf" $driverTarget -Force
-}
-if (Test-Path "$pkgSourceDir\DCSS.WfpCallout.cat") {
-    Copy-Item "$pkgSourceDir\DCSS.WfpCallout.cat" $driverTarget -Force
-}
+# Copy third party notices
+Copy-Item (Join-Path $repoRoot "THIRD_PARTY_NOTICES.md") $publishDir -Force
 
 # Verify runtime dependencies
 $requiredFiles = @(
     "$publishDir\DC-ScreenSharing.exe",
     "$publishDir\DCSS.NetworkService.exe",
     "$publishDir\DC-ScreenSharing.Updater.exe",
-    "$publishDir\driver\DCSS.WfpCallout.sys",
-    "$publishDir\driver\DCSS.WfpCallout.inf",
-    "$publishDir\driver\DCSS.WfpCallout.cat",
-    "$publishDir\native\dcss-engine.exe",
+    "$publishDir\native\WinDivert.dll",
+    "$publishDir\native\WinDivert64.sys",
     "$publishDir\native\wintun.dll",
+    "$publishDir\native\dcss-engine.exe",
+    "$publishDir\openvpn\openvpn.exe",
     "$maintainerDir\DCSS.Maintainer.exe",
     "$collectorDir\DCSS.ProfileCollector.exe"
 )
@@ -224,7 +213,7 @@ $isccExitCode = 0
 if (Test-Path $iscc) {
     $isccExitCode = (Invoke-StepWithTimeout -StageName "[6/7] Compile Installer (Inno Setup)" `
         -FilePath $iscc `
-        -ArgumentList @("/DMyAppVersion=$Version", (Join-Path $repoRoot "installer\DC-ScreenSharing.iss")) `
+        -ArgumentList @("/DMyAppVersion=$Version", "/O$installerDir", (Join-Path $repoRoot "installer\DC-ScreenSharing.iss")) `
         -TimeoutSec 240).ExitCode
 } else {
     throw "Inno Setup Compiler (ISCC.exe) not found at $iscc"
@@ -248,12 +237,9 @@ $swTotal.Stop()
 $totalTimeStr = $swTotal.Elapsed.ToString("mm\:ss")
 
 Write-Host ">>> COMPLETE [7/7] Verify Artifacts" -ForegroundColor Green
-
 Write-Host "==================================================" -ForegroundColor Green
-Write-Host "BUILD SUCCESSFUL" -ForegroundColor Green
-Write-Host "Installer: $setupExe" -ForegroundColor Green
-Write-Host "Installer size: $setupSizeMB ($setupSize bytes)" -ForegroundColor Green
-Write-Host "SHA-256: $hash" -ForegroundColor Cyan
-Write-Host "Inno Setup exit code: $isccExitCode" -ForegroundColor Green
-Write-Host "Total build time: $totalTimeStr" -ForegroundColor Green
+Write-Host "RELEASE BUILD SUCCESSFUL" -ForegroundColor Green
+Write-Host "Installer: $setupExe ($setupSizeMB)" -ForegroundColor Green
+Write-Host "SHA256:    $hash" -ForegroundColor Green
+Write-Host "Total Time: $totalTimeStr" -ForegroundColor Green
 Write-Host "==================================================" -ForegroundColor Green

@@ -425,24 +425,37 @@ public class MainViewModel : INotifyPropertyChanged
                 return;
             }
 
+            var isOvpn = VpnProtocol.IsOpenVpn(SelectedServer.Protocol) || (profile.Openvpn != null && profile.Wireguard == null);
             var tunnelConfig = new TunnelConfiguration
             {
                 ServerId = profile.ServerId,
                 ServerName = SelectedServer.Name,
-                Endpoint = profile.Wireguard.Endpoint,
-                Port = profile.Wireguard.Port,
-                Address = profile.Wireguard.Address,
-                Addresses = new List<string>(profile.Wireguard.Addresses),
-                Dns = profile.Wireguard.Dns,
-                DnsServers = new List<string>(profile.Wireguard.DnsServers),
-                PrivateKey = profile.Wireguard.PrivateKey,
-                PeerPublicKey = profile.Wireguard.PeerPublicKey,
-                AllowedIps = profile.Wireguard.AllowedIps,
-                AllowedIpsList = new List<string>(profile.Wireguard.AllowedIpsList),
-                Mtu = profile.Wireguard.Mtu,
-                PersistentKeepalive = profile.Wireguard.PersistentKeepalive,
+                Protocol = isOvpn ? VpnProtocol.OpenVpn : VpnProtocol.WireGuard,
                 DiscordExecutablePath = _detectedDiscord.ExecutablePath
             };
+
+            if (isOvpn && profile.Openvpn != null)
+            {
+                var primaryRemote = profile.Openvpn.RemoteEndpoints.FirstOrDefault();
+                tunnelConfig.Endpoint = primaryRemote?.Host ?? "127.0.0.1";
+                tunnelConfig.Port = primaryRemote?.Port ?? 1194;
+                tunnelConfig.OpenVpnProfileJson = System.Text.Json.JsonSerializer.Serialize(profile.Openvpn);
+            }
+            else if (profile.Wireguard != null)
+            {
+                tunnelConfig.Endpoint = profile.Wireguard.Endpoint;
+                tunnelConfig.Port = profile.Wireguard.Port;
+                tunnelConfig.Address = profile.Wireguard.Address;
+                tunnelConfig.Addresses = new List<string>(profile.Wireguard.Addresses);
+                tunnelConfig.Dns = profile.Wireguard.Dns;
+                tunnelConfig.DnsServers = new List<string>(profile.Wireguard.DnsServers);
+                tunnelConfig.PrivateKey = profile.Wireguard.PrivateKey;
+                tunnelConfig.PeerPublicKey = profile.Wireguard.PeerPublicKey;
+                tunnelConfig.AllowedIps = profile.Wireguard.AllowedIps;
+                tunnelConfig.AllowedIpsList = new List<string>(profile.Wireguard.AllowedIpsList);
+                tunnelConfig.Mtu = profile.Wireguard.Mtu;
+                tunnelConfig.PersistentKeepalive = profile.Wireguard.PersistentKeepalive;
+            }
 
             // Pre-validate engine configuration via NetworkService before any destructive action
             _stateMachine.TransitionTo(ConnectionState.Preparing, "Validating routing engine configuration...");

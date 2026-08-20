@@ -16,13 +16,13 @@ using Xunit;
 
 namespace DC_ScreenSharing.IntegrationTests;
 
-public class FullLifecycleIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public class FullLifecycleIntegrationTests : IClassFixture<WebApplicationFactory<global::Program>>, IDisposable
 {
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly WebApplicationFactory<global::Program> _factory;
     private readonly HttpClient _client;
     private readonly string _testStorageDir;
 
-    public FullLifecycleIntegrationTests(WebApplicationFactory<Program> factory)
+    public FullLifecycleIntegrationTests(WebApplicationFactory<global::Program> factory)
     {
         _testStorageDir = Path.Combine(Path.GetTempPath(), "DCSS_ProfileService_Test_" + Guid.NewGuid().ToString("N"));
         Environment.SetEnvironmentVariable("ProfileService__StoragePath", _testStorageDir);

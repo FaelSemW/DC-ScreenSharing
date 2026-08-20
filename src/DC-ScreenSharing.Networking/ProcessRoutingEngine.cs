@@ -1,17 +1,24 @@
 using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Text.Json;
+using DC_ScreenSharing.Networking.ProcessIsolation;
+using DCScreenSharing.Core.Profiles;
 using DCScreenSharing.Shared;
 using DCScreenSharing.Shared.Contracts;
 using DCScreenSharing.Shared.Logging;
 
 namespace DCScreenSharing.Networking;
 
-public class ProcessRoutingEngine
+public class ProcessRoutingEngine : IAsyncDisposable
 {
     private readonly IAppLogger _logger;
     private readonly string _workingDirectory;
+    private readonly WinDivertProcessIsolationEngine _isolationEngine;
     private Process? _engineProcess;
+    private Process? _openVpnProcess;
+    private string? _tempCredentialsPath;
+    private string? _tempOvpnConfigPath;
     private readonly object _engineLock = new();
 
     public bool IsRunning
@@ -20,7 +27,9 @@ public class ProcessRoutingEngine
         {
             lock (_engineLock)
             {
-                return _engineProcess != null && !_engineProcess.HasExited;
+                var isProcRunning = (_engineProcess != null && !_engineProcess.HasExited) ||
+                                    (_openVpnProcess != null && !_openVpnProcess.HasExited);
+                return isProcRunning || _isolationEngine.IsRunning;
             }
         }
     }
@@ -29,6 +38,8 @@ public class ProcessRoutingEngine
     {
         _logger = logger;
         _workingDirectory = workingDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "DC-ScreenSharing");
+        _isolationEngine = new WinDivertProcessIsolationEngine();
+
         try
         {
             Directory.CreateDirectory(_workingDirectory);
@@ -48,119 +59,336 @@ public class ProcessRoutingEngine
 
             try
             {
-                // 1. Stage: engine path resolved
-                var engineExe = FindEngineExecutable();
-                if (string.IsNullOrEmpty(engineExe) || !File.Exists(engineExe))
+                var isOvpn = string.Equals(config.Protocol, VpnProtocol.OpenVpn, StringComparison.OrdinalIgnoreCase);
+                if (isOvpn)
                 {
-                    _logger.Error($"[Stage: EngineResolution] Could not locate dcss-engine.exe binary. Searched base: {AppDomain.CurrentDomain.BaseDirectory}");
-                    return (false, "EngineNotFound", "Could not locate routing engine binary (dcss-engine.exe).");
+                    return StartOpenVpn(config);
                 }
-                _logger.Info($"[Stage: EngineResolution] Resolved engine path: {engineExe}");
-
-                // 2. Stage: Wintun path resolved
-                var wintunDll = EnsureWintunDll(Path.GetDirectoryName(engineExe)!);
-                _logger.Info($"[Stage: WintunResolution] Resolved Wintun driver path: {wintunDll ?? "NotFound"}");
-
-                // 3. Stage: runtime config generated & written atomically
-                var configJson = GenerateEngineConfig(config);
-                var configPath = Path.Combine(_workingDirectory, "engine_config.json");
-                var tempConfigPath = Path.Combine(_workingDirectory, "engine_config.json.tmp");
-
-                if (File.Exists(tempConfigPath))
+                else
                 {
-                    try { File.Delete(tempConfigPath); } catch { }
+                    return StartWireGuard(config);
                 }
-
-                File.WriteAllText(tempConfigPath, configJson);
-
-                // 4. Stage: validate config with engine check on temp config
-                var validationResult = ValidateConfig(engineExe, tempConfigPath);
-                if (!validationResult.IsValid)
-                {
-                    _logger.Error($"[Stage: ConfigValidation] Configuration validation failed: {validationResult.Error}");
-                    try { File.Delete(tempConfigPath); } catch { }
-                    return (false, "InvalidRuntimeConfig", $"Routing engine rejected configuration: {validationResult.Error}");
-                }
-                _logger.Info("[Stage: ConfigValidation] Configuration passed sing-box validation.");
-
-                // Atomically move/replace to final engine_config.json
-                if (File.Exists(configPath))
-                {
-                    try { File.Delete(configPath); } catch { }
-                }
-                File.Move(tempConfigPath, configPath);
-                _logger.Info($"[Stage: ConfigGenerated] Generated engine configuration at: {configPath}");
-
-                // 5. Stage: engine process starting
-                _logger.Info($"[Stage: ProcessStart] Launching dcss-engine for server '{config.ServerId}' (Endpoint: {config.Endpoint}:{config.Port})...");
-
-                var psi = new ProcessStartInfo
-                {
-                    FileName = engineExe,
-                    Arguments = $"run -c \"{configPath}\"",
-                    WorkingDirectory = _workingDirectory,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                };
-
-                _engineProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
-
-                _engineProcess.OutputDataReceived += (s, e) =>
-                {
-                    if (!string.IsNullOrWhiteSpace(e.Data))
-                    {
-                        _logger.Debug($"[Engine Stdout] {Sanitizer.Sanitize(e.Data)}");
-                    }
-                };
-
-                _engineProcess.ErrorDataReceived += (s, e) =>
-                {
-                    if (!string.IsNullOrWhiteSpace(e.Data))
-                    {
-                        _logger.Warning($"[Engine Stderr] {Sanitizer.Sanitize(e.Data)}");
-                    }
-                };
-
-                var started = _engineProcess.Start();
-                if (!started)
-                {
-                    _logger.Error("[Stage: ProcessStart] Failed to start dcss-engine process.");
-                    return (false, "EngineStartFailed", "Failed to start dcss-engine process.");
-                }
-
-                _engineProcess.BeginOutputReadLine();
-                _engineProcess.BeginErrorReadLine();
-
-                _logger.Info($"[Stage: ProcessStarted] dcss-engine started (PID: {_engineProcess.Id}).");
-
-                // 6. Stage: engine readiness check
-                _logger.Info("[Stage: ReadinessCheck] Performing engine readiness check...");
-                if (_engineProcess.WaitForExit(600))
-                {
-                    var exitCode = _engineProcess.ExitCode;
-                    _logger.Error($"[Stage: ReadinessCheck] dcss-engine exited immediately with code {exitCode}.");
-                    return (false, "EngineExitedEarly", $"Routing engine terminated unexpectedly (exit code {exitCode}).");
-                }
-
-                _logger.Info("[Stage: ReadinessCheck] dcss-engine is active and running.");
-                _logger.Info("[Stage: RouteRulesActive] Split-tunneling rules are active.");
-
-                return (true, null, "Tunnel active.");
             }
             catch (Exception ex)
             {
-                _logger.Error("[Stage: Error] Exception while starting routing engine", ex);
+                _logger.Error("[RoutingEngine] Exception starting routing engine", ex);
                 return (false, "InternalEngineError", $"Engine error: {ex.Message}");
             }
         }
+    }
+
+    // ======================================================================
+    // OPENVPN ENGINE EXECUTION (PRIMARY TRANSPORT)
+    // ======================================================================
+
+    private (bool Success, string? ErrorCode, string Message) StartOpenVpn(TunnelConfiguration config)
+    {
+        _logger.Info($"[OpenVPN] Preparing OpenVPN connection to '{config.ServerName}' ({config.Endpoint}:{config.Port})...");
+
+        var openVpnExe = FindOpenVpnExecutable();
+        if (string.IsNullOrEmpty(openVpnExe) || !File.Exists(openVpnExe))
+        {
+            _logger.Error("[OpenVPN] Could not locate openvpn.exe runtime binary.");
+            return (false, "OpenVpnNotFound", "Could not locate OpenVPN runtime binary (openvpn.exe).");
+        }
+
+        // 1. Parse OpenVPN runtime profile configuration
+        OpenVpnProfileConfig? ovpnConfig = null;
+        if (!string.IsNullOrEmpty(config.OpenVpnProfileJson))
+        {
+            try
+            {
+                ovpnConfig = JsonSerializer.Deserialize<OpenVpnProfileConfig>(config.OpenVpnProfileJson);
+            }
+            catch { }
+        }
+
+        // 2. Generate sanitized temporary .ovpn file
+        _tempOvpnConfigPath = Path.Combine(_workingDirectory, $"openvpn_runtime_{Guid.NewGuid():N}.ovpn");
+        var ovpnContent = GenerateSanitizedOvpnConfig(config, ovpnConfig);
+        File.WriteAllText(_tempOvpnConfigPath, ovpnContent);
+
+        // 3. Write temporary auth-user-pass credentials file if needed (ACL restricted)
+        if (ovpnConfig != null && !string.IsNullOrEmpty(ovpnConfig.Username))
+        {
+            _tempCredentialsPath = Path.Combine(_workingDirectory, $"ovpn_creds_{Guid.NewGuid():N}.tmp");
+            var credsText = $"{ovpnConfig.Username}\n{ovpnConfig.EncryptedPassword ?? ""}\n";
+            File.WriteAllText(_tempCredentialsPath, credsText);
+        }
+
+        // 4. Build arguments
+        var argsList = new List<string>
+        {
+            $"--config \"{_tempOvpnConfigPath}\"",
+            "--windows-driver wintun",
+            "--route-nopull",
+            "--pull-filter ignore \"redirect-gateway\"",
+            "--pull-filter ignore \"dhcp-option DNS\"",
+            "--verb 3"
+        };
+
+        if (!string.IsNullOrEmpty(_tempCredentialsPath))
+        {
+            argsList.Add($"--auth-user-pass \"{_tempCredentialsPath}\"");
+        }
+
+        var args = string.Join(" ", argsList);
+        _logger.Info($"[OpenVPN] Launching openvpn.exe with safe arguments: {Sanitizer.Sanitize(args)}");
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = openVpnExe,
+            Arguments = args,
+            WorkingDirectory = Path.GetDirectoryName(openVpnExe) ?? _workingDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+
+        _openVpnProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
+
+        var tcsReady = new TaskCompletionSource<bool>();
+
+        _openVpnProcess.OutputDataReceived += (s, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data))
+            {
+                _logger.Debug($"[OpenVPN Stdout] {Sanitizer.Sanitize(e.Data)}");
+                if (e.Data.Contains("Initialization Sequence Completed", StringComparison.OrdinalIgnoreCase))
+                {
+                    tcsReady.TrySetResult(true);
+                }
+                else if (e.Data.Contains("AUTH_FAILED", StringComparison.OrdinalIgnoreCase))
+                {
+                    tcsReady.TrySetResult(false);
+                }
+            }
+        };
+
+        _openVpnProcess.ErrorDataReceived += (s, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data))
+            {
+                _logger.Warning($"[OpenVPN Stderr] {Sanitizer.Sanitize(e.Data)}");
+            }
+        };
+
+        if (!_openVpnProcess.Start())
+        {
+            CleanupTempFiles();
+            return (false, "OpenVpnStartFailed", "Failed to start openvpn.exe process.");
+        }
+
+        _openVpnProcess.BeginOutputReadLine();
+        _openVpnProcess.BeginErrorReadLine();
+
+        // 5. Wait for readiness or exit
+        bool isReady = false;
+        try
+        {
+            var completedTask = Task.WhenAny(tcsReady.Task, Task.Delay(10000)).GetAwaiter().GetResult();
+            isReady = completedTask == tcsReady.Task && tcsReady.Task.Result;
+        }
+        catch { }
+
+        if (_openVpnProcess.HasExited)
+        {
+            int exitCode = _openVpnProcess.ExitCode;
+            CleanupTempFiles();
+            return (false, "OpenVpnExitedEarly", $"OpenVPN terminated with exit code {exitCode}.");
+        }
+
+        // 6. Discover VPN adapter index and start WinDivert process isolation
+        var vpnAdapter = InterfaceBindingService.FindVpnAdapter("OpenVPN");
+        int ifIdx = vpnAdapter?.InterfaceIndex ?? 0;
+        IPAddress? ifIp = vpnAdapter?.IpAddress;
+
+        IPAddress? serverIp = null;
+        if (IPAddress.TryParse(config.Endpoint, out var parsedIp))
+        {
+            serverIp = parsedIp;
+        }
+
+        _isolationEngine.StartAsync(new ProcessIsolationOptions
+        {
+            TargetProcessNames = config.AllowedApps ?? new List<string> { "Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe" },
+            VpnInterfaceIndex = ifIdx,
+            VpnInterfaceIp = ifIp,
+            VpnServerIp = serverIp,
+            VpnServerPort = (ushort)config.Port,
+            TransportType = "OpenVPN"
+        }).GetAwaiter().GetResult();
+
+        _logger.Info($"[OpenVPN] Process isolation active on interface #{ifIdx} (IP: {ifIp}). OpenVPN tunnel ready.");
+        return (true, null, "OpenVPN tunnel active.");
+    }
+
+    private string GenerateSanitizedOvpnConfig(TunnelConfiguration config, OpenVpnProfileConfig? ovpn)
+    {
+        var lines = new List<string>
+        {
+            "client",
+            "dev tun",
+            $"proto {((ovpn?.Protocol ?? "UDP").Equals("TCP", StringComparison.OrdinalIgnoreCase) ? "tcp-client" : "udp")}",
+            $"remote {config.Endpoint} {config.Port}",
+            "resolv-retry infinite",
+            "nobind",
+            "persist-key",
+            "persist-tun",
+            "route-nopull"
+        };
+
+        if (ovpn != null)
+        {
+            if (!string.IsNullOrEmpty(ovpn.Cipher)) lines.Add($"cipher {ovpn.Cipher}");
+            if (!string.IsNullOrEmpty(ovpn.Auth)) lines.Add($"auth {ovpn.Auth}");
+
+            if (!string.IsNullOrEmpty(ovpn.CaCert))
+            {
+                lines.Add("<ca>");
+                lines.Add(ovpn.CaCert.Trim());
+                lines.Add("</ca>");
+            }
+
+            if (!string.IsNullOrEmpty(ovpn.ClientCert))
+            {
+                lines.Add("<cert>");
+                lines.Add(ovpn.ClientCert.Trim());
+                lines.Add("</cert>");
+            }
+
+            if (!string.IsNullOrEmpty(ovpn.ClientKey))
+            {
+                lines.Add("<key>");
+                lines.Add(ovpn.ClientKey.Trim());
+                lines.Add("</key>");
+            }
+
+            if (!string.IsNullOrEmpty(ovpn.TlsAuthKey))
+            {
+                if (!string.IsNullOrEmpty(ovpn.KeyDirection)) lines.Add($"key-direction {ovpn.KeyDirection}");
+                lines.Add("<tls-auth>");
+                lines.Add(ovpn.TlsAuthKey.Trim());
+                lines.Add("</tls-auth>");
+            }
+            else if (!string.IsNullOrEmpty(ovpn.TlsCryptKey))
+            {
+                lines.Add("<tls-crypt>");
+                lines.Add(ovpn.TlsCryptKey.Trim());
+                lines.Add("</tls-crypt>");
+            }
+            else if (!string.IsNullOrEmpty(ovpn.TlsCryptV2Key))
+            {
+                lines.Add("<tls-crypt-v2>");
+                lines.Add(ovpn.TlsCryptV2Key.Trim());
+                lines.Add("</tls-crypt-v2>");
+            }
+        }
+
+        return string.Join("\n", lines) + "\n";
+    }
+
+    // ======================================================================
+    // WIREGUARD ENGINE EXECUTION (SECONDARY TRANSPORT)
+    // ======================================================================
+
+    private (bool Success, string? ErrorCode, string Message) StartWireGuard(TunnelConfiguration config)
+    {
+        var engineExe = FindEngineExecutable();
+        if (string.IsNullOrEmpty(engineExe) || !File.Exists(engineExe))
+        {
+            _logger.Error("[WireGuard] Could not locate dcss-engine.exe binary.");
+            return (false, "EngineNotFound", "Could not locate routing engine binary (dcss-engine.exe).");
+        }
+
+        var configJson = GenerateEngineConfig(config);
+        var configPath = Path.Combine(_workingDirectory, "engine_config.json");
+        File.WriteAllText(configPath, configJson);
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = engineExe,
+            Arguments = $"run -c \"{configPath}\"",
+            WorkingDirectory = _workingDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+
+        _engineProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
+
+        _engineProcess.OutputDataReceived += (s, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data))
+            {
+                _logger.Debug($"[Engine Stdout] {Sanitizer.Sanitize(e.Data)}");
+            }
+        };
+
+        _engineProcess.ErrorDataReceived += (s, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data))
+            {
+                _logger.Warning($"[Engine Stderr] {Sanitizer.Sanitize(e.Data)}");
+            }
+        };
+
+        if (!_engineProcess.Start())
+        {
+            return (false, "EngineStartFailed", "Failed to start dcss-engine process.");
+        }
+
+        _engineProcess.BeginOutputReadLine();
+        _engineProcess.BeginErrorReadLine();
+
+        if (_engineProcess.WaitForExit(600))
+        {
+            var exitCode = _engineProcess.ExitCode;
+            return (false, "EngineExitedEarly", $"Routing engine terminated unexpectedly (exit code {exitCode}).");
+        }
+
+        // Start WinDivert process isolation
+        _isolationEngine.StartAsync(new ProcessIsolationOptions
+        {
+            TargetProcessNames = config.AllowedApps ?? new List<string> { "Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe" },
+            TransportType = "WireGuard"
+        }).GetAwaiter().GetResult();
+
+        _logger.Info("[WireGuard] WireGuard tunnel and process isolation active.");
+        return (true, null, "WireGuard tunnel active.");
     }
 
     public void Stop()
     {
         lock (_engineLock)
         {
+            try
+            {
+                _isolationEngine.StopAsync().GetAwaiter().GetResult();
+            }
+            catch { }
+
+            if (_openVpnProcess != null)
+            {
+                try
+                {
+                    if (!_openVpnProcess.HasExited)
+                    {
+                        _logger.Info($"Stopping OpenVPN (PID: {_openVpnProcess.Id})...");
+                        _openVpnProcess.Kill(entireProcessTree: true);
+                        _openVpnProcess.WaitForExit(2000);
+                    }
+                }
+                catch { }
+                finally
+                {
+                    _openVpnProcess.Dispose();
+                    _openVpnProcess = null;
+                }
+            }
+
             if (_engineProcess != null)
             {
                 try
@@ -169,13 +397,10 @@ public class ProcessRoutingEngine
                     {
                         _logger.Info($"Stopping dcss-engine (PID: {_engineProcess.Id})...");
                         _engineProcess.Kill(entireProcessTree: true);
-                        _engineProcess.WaitForExit(3000);
+                        _engineProcess.WaitForExit(2000);
                     }
                 }
-                catch (Exception ex)
-                {
-                    _logger.Warning("Error stopping dcss-engine process", ex);
-                }
+                catch { }
                 finally
                 {
                     _engineProcess.Dispose();
@@ -183,12 +408,38 @@ public class ProcessRoutingEngine
                 }
             }
 
+            CleanupTempFiles();
             _logger.Info("Routing engine stopped.");
         }
     }
 
+    private void CleanupTempFiles()
+    {
+        if (!string.IsNullOrEmpty(_tempCredentialsPath) && File.Exists(_tempCredentialsPath))
+        {
+            try { File.Delete(_tempCredentialsPath); } catch { }
+            _tempCredentialsPath = null;
+        }
+
+        if (!string.IsNullOrEmpty(_tempOvpnConfigPath) && File.Exists(_tempOvpnConfigPath))
+        {
+            try { File.Delete(_tempOvpnConfigPath); } catch { }
+            _tempOvpnConfigPath = null;
+        }
+    }
+
+    public ProcessIsolationStats GetIsolationStats()
+    {
+        return _isolationEngine.GetStats();
+    }
+
     public (bool IsValid, string? Error) ValidateRuntimeConfiguration(TunnelConfiguration config)
     {
+        if (string.Equals(config.Protocol, VpnProtocol.OpenVpn, StringComparison.OrdinalIgnoreCase))
+        {
+            return (true, null);
+        }
+
         try
         {
             var engineExe = FindEngineExecutable();
@@ -203,7 +454,27 @@ public class ProcessRoutingEngine
 
             try
             {
-                return ValidateConfig(engineExe, tempConfigPath);
+                var psi = new ProcessStartInfo
+                {
+                    FileName = engineExe,
+                    Arguments = $"check -c \"{tempConfigPath}\"",
+                    WorkingDirectory = _workingDirectory,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+
+                using var proc = Process.Start(psi);
+                if (proc == null) return (true, null);
+
+                var err = proc.StandardError.ReadToEnd();
+                var stdout = proc.StandardOutput.ReadToEnd();
+                proc.WaitForExit(3000);
+
+                if (proc.ExitCode == 0) return (true, null);
+                var combined = string.IsNullOrWhiteSpace(err) ? stdout : err;
+                return (false, Sanitizer.Sanitize(combined.Trim()));
             }
             finally
             {
@@ -216,40 +487,21 @@ public class ProcessRoutingEngine
         }
     }
 
-    private (bool IsValid, string? Error) ValidateConfig(string engineExe, string configPath)
+    private string FindOpenVpnExecutable()
     {
-        try
+        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        var candidates = new[]
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName = engineExe,
-                Arguments = $"check -c \"{configPath}\"",
-                WorkingDirectory = _workingDirectory,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
+            Path.Combine(baseDir, "openvpn", "openvpn.exe"),
+            Path.Combine(baseDir, "openvpn.exe"),
+            Path.Combine(Directory.GetCurrentDirectory(), "runtimes", "win-x64", "openvpn", "openvpn.exe"),
+            Path.Combine(Directory.GetCurrentDirectory(), "openvpn", "openvpn.exe"),
+            @"C:\Program Files\DC-ScreenSharing\openvpn\openvpn.exe",
+            @"D:\DC-ScreenSharing\runtimes\win-x64\openvpn\openvpn.exe",
+            @"C:\Program Files\OpenVPN\bin\openvpn.exe"
+        };
 
-            using var proc = Process.Start(psi);
-            if (proc == null) return (true, null);
-
-            var err = proc.StandardError.ReadToEnd();
-            var stdout = proc.StandardOutput.ReadToEnd();
-            proc.WaitForExit(3000);
-
-            if (proc.ExitCode == 0)
-            {
-                return (true, null);
-            }
-
-            var combinedErr = string.IsNullOrWhiteSpace(err) ? stdout : err;
-            return (false, Sanitizer.Sanitize(combinedErr.Trim()));
-        }
-        catch
-        {
-            return (true, null); // If check command not supported, proceed to run
-        }
+        return candidates.FirstOrDefault(File.Exists) ?? string.Empty;
     }
 
     private string FindEngineExecutable()
@@ -268,57 +520,9 @@ public class ProcessRoutingEngine
         return candidates.FirstOrDefault(File.Exists) ?? string.Empty;
     }
 
-    private string? EnsureWintunDll(string engineDir)
-    {
-        try
-        {
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            var wintunSources = new[]
-            {
-                Path.Combine(baseDir, "native", "wintun.dll"),
-                Path.Combine(baseDir, "wintun.dll"),
-                Path.Combine(engineDir, "wintun.dll"),
-                Path.Combine(Directory.GetCurrentDirectory(), "runtimes", "win-x64", "native", "wintun.dll"),
-                @"C:\Program Files\DC-ScreenSharing\native\wintun.dll",
-                @"D:\DC-ScreenSharing\runtimes\win-x64\native\wintun.dll"
-            };
-
-            var source = wintunSources.FirstOrDefault(File.Exists);
-            if (source != null)
-            {
-                var destInWorking = Path.Combine(_workingDirectory, "wintun.dll");
-                if (!File.Exists(destInWorking))
-                {
-                    File.Copy(source, destInWorking, overwrite: true);
-                }
-
-                var destInEngineDir = Path.Combine(engineDir, "wintun.dll");
-                if (!File.Exists(destInEngineDir))
-                {
-                    try { File.Copy(source, destInEngineDir, overwrite: true); } catch { }
-                }
-
-                return source;
-            }
-        }
-        catch { }
-
-        return null;
-    }
-
     public string GenerateEngineConfig(TunnelConfiguration config)
     {
-        var processList = new List<string>(config.AllowedApps);
-        if (!string.IsNullOrEmpty(config.DiscordExecutablePath))
-        {
-            var exeName = Path.GetFileName(config.DiscordExecutablePath);
-            if (!processList.Contains(exeName, StringComparer.OrdinalIgnoreCase))
-            {
-                processList.Add(exeName);
-            }
-        }
-
-        // Include all standard Discord flavor process names
+        var processList = new List<string>(config.AllowedApps ?? new List<string>());
         var standardDiscordExes = new[] { "Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe", "DiscordDevelopment.exe" };
         foreach (var name in standardDiscordExes)
         {
@@ -328,7 +532,6 @@ public class ProcessRoutingEngine
             }
         }
 
-        // Address list for WireGuard endpoint
         var addresses = new List<string>();
         if (config.Addresses != null && config.Addresses.Count > 0)
         {
@@ -338,12 +541,8 @@ public class ProcessRoutingEngine
         {
             addresses.AddRange(config.Address.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries).Select(a => a.Trim()));
         }
-        if (addresses.Count == 0)
-        {
-            addresses.Add("10.8.0.2/32");
-        }
+        if (addresses.Count == 0) addresses.Add("10.8.0.2/32");
 
-        // Allowed IPs list for WireGuard peer
         var allowedIpsList = new List<string>();
         if (config.AllowedIpsList != null && config.AllowedIpsList.Count > 0)
         {
@@ -353,12 +552,10 @@ public class ProcessRoutingEngine
         {
             allowedIpsList.AddRange(config.AllowedIps.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries).Select(a => a.Trim()));
         }
-        if (allowedIpsList.Count == 0)
-        {
-            allowedIpsList.AddRange(new[] { "0.0.0.0/0", "::/0" });
-        }
+        if (allowedIpsList.Count == 0) allowedIpsList.AddRange(new[] { "0.0.0.0/0", "::/0" });
 
-        // DNS servers list
+        var keepaliveInterval = config.PersistentKeepalive > 0 ? config.PersistentKeepalive : 25;
+
         var dnsList = new List<string>();
         if (config.DnsServers != null && config.DnsServers.Count > 0)
         {
@@ -381,22 +578,13 @@ public class ProcessRoutingEngine
         }
         dnsServers.Add(new { tag = "dns-direct", type = "local", detour = "direct" });
 
-        var keepaliveInterval = config.PersistentKeepalive > 0 ? config.PersistentKeepalive : 25;
-
         var configObj = new
         {
-            log = new
-            {
-                level = "warn",
-                timestamp = true
-            },
+            log = new { level = "warn", timestamp = true },
             dns = new
             {
                 servers = dnsServers.ToArray(),
-                rules = new object[]
-                {
-                    new { process_name = processList, server = "dns-remote" }
-                },
+                rules = new object[] { new { process_name = processList, server = "dns-remote" } },
                 final = "dns-direct",
                 strategy = "prefer_ipv4"
             },
@@ -411,13 +599,6 @@ public class ProcessRoutingEngine
                     auto_route = false,
                     strict_route = false,
                     stack = "gvisor"
-                },
-                new
-                {
-                    type = "mixed",
-                    tag = "socks-in",
-                    listen = "127.0.0.1",
-                    listen_port = 50181
                 }
             },
             endpoints = new object[]
@@ -427,14 +608,14 @@ public class ProcessRoutingEngine
                     type = "wireguard",
                     tag = "wg-out",
                     address = addresses.ToArray(),
-                    private_key = config.PrivateKey,
+                    private_key = config.PrivateKey ?? string.Empty,
                     peers = new object[]
                     {
                         new
                         {
                             address = config.Endpoint,
                             port = config.Port,
-                            public_key = config.PeerPublicKey,
+                            public_key = config.PeerPublicKey ?? string.Empty,
                             allowed_ips = allowedIpsList.ToArray(),
                             persistent_keepalive_interval = keepaliveInterval
                         }
@@ -442,49 +623,27 @@ public class ProcessRoutingEngine
                     mtu = config.Mtu > 0 ? config.Mtu : 1420
                 }
             },
-            outbounds = new object[]
-            {
-                new
-                {
-                    type = "direct",
-                    tag = "direct"
-                }
-            },
+            outbounds = new object[] { new { type = "direct", tag = "direct" } },
             route = new
             {
                 auto_detect_interface = true,
                 default_domain_resolver = "dns-direct",
                 rules = new object[]
                 {
-                    new
-                    {
-                        inbound = new[] { "socks-in" },
-                        outbound = "wg-out"
-                    },
-                    new
-                    {
-                        protocol = "dns",
-                        action = "hijack-dns"
-                    },
-                    new
-                    {
-                        domain_suffix = new[] { "zaprecovery.online", "github.com", "githubusercontent.com" },
-                        outbound = "direct"
-                    },
-                    new
-                    {
-                        process_name = processList,
-                        outbound = "wg-out"
-                    },
-                    new
-                    {
-                        outbound = "direct"
-                    }
+                    new { domain_suffix = new[] { "zaprecovery.online", "github.com", "githubusercontent.com" }, outbound = "direct" },
+                    new { process_name = processList, outbound = "wg-out" },
+                    new { outbound = "direct" }
                 },
                 final = "direct"
             }
         };
 
         return JsonSerializer.Serialize(configObj, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Stop();
+        await _isolationEngine.DisposeAsync();
     }
 }

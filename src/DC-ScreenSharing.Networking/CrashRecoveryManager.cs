@@ -91,7 +91,8 @@ public class CrashRecoveryManager
                         {
                             var proc = System.Diagnostics.Process.GetProcessById(record.EnginePid.Value);
                             if (proc.ProcessName.Contains("dcss-engine", StringComparison.OrdinalIgnoreCase) ||
-                                proc.ProcessName.Contains("sing-box", StringComparison.OrdinalIgnoreCase))
+                                proc.ProcessName.Contains("sing-box", StringComparison.OrdinalIgnoreCase) ||
+                                proc.ProcessName.Contains("openvpn", StringComparison.OrdinalIgnoreCase))
                             {
                                 _logger.Info($"Terminating orphaned routing engine PID {record.EnginePid.Value}...");
                                 proc.Kill(entireProcessTree: true);

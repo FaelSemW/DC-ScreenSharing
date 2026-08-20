@@ -4,9 +4,8 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using DCScreenSharing.Core.Profiles;
 using DCScreenSharing.Networking;
-using DCScreenSharing.Networking.Proxy;
-using DCScreenSharing.Networking.Wfp;
 using DCScreenSharing.Shared;
 using DCScreenSharing.Shared.Contracts;
 using DCScreenSharing.Shared.Logging;
@@ -18,8 +17,6 @@ public class IpcServer
     private readonly ProcessRoutingEngine _engine;
     private readonly CrashRecoveryManager _recovery;
     private readonly IAppLogger _logger;
-    private readonly RedirectProxyService _proxy;
-    private readonly WfpManager _wfpManager;
     private CancellationTokenSource? _cts;
     private Task? _serverTask;
     private readonly object _serverLock = new();
@@ -27,16 +24,15 @@ public class IpcServer
     private bool _isConnected;
     private string? _activeServerId;
     private string? _activeServerName;
+    private string? _activeProtocol;
     private DateTime? _connectedSinceUtc;
     private string? _lastError;
 
-    public IpcServer(ProcessRoutingEngine engine, CrashRecoveryManager recovery, IAppLogger logger, RedirectProxyService? proxy = null, WfpManager? wfpManager = null)
+    public IpcServer(ProcessRoutingEngine engine, CrashRecoveryManager recovery, IAppLogger logger)
     {
         _engine = engine;
         _recovery = recovery;
         _logger = logger;
-        _proxy = proxy ?? new RedirectProxyService(logger);
-        _wfpManager = wfpManager ?? new WfpManager(logger);
     }
 
     public void Start()
@@ -65,8 +61,6 @@ public class IpcServer
             }
             catch { }
 
-            _wfpManager.Dispose();
-            _proxy.Dispose();
             _engine.Stop();
             _recovery.ClearState();
             _isConnected = false;
@@ -94,7 +88,6 @@ public class IpcServer
 
                 await pipeServer.WaitForConnectionAsync(ct);
 
-                // Transfer ownership of pipeServer to worker task
                 var activePipe = pipeServer;
                 pipeServer = null;
                 _ = Task.Run(() => HandleClientAsync(activePipe, ct), ct);
@@ -226,8 +219,6 @@ public class IpcServer
                 break;
 
             case IpcCommand.CleanupOrphaned:
-                _wfpManager.RemoveAllFilters();
-                _proxy.Stop();
                 _recovery.PerformStartupRecovery(_engine);
                 response.PayloadJson = "\"cleaned\"";
                 break;
@@ -287,43 +278,28 @@ public class IpcServer
             }
 
             var config = JsonSerializer.Deserialize<TunnelConfiguration>(payloadJson);
-            if (config == null || string.IsNullOrEmpty(config.Endpoint) || string.IsNullOrEmpty(config.PrivateKey))
+            if (config == null || string.IsNullOrEmpty(config.Endpoint))
             {
                 _logger.Warning("[IPC:StartTunnel] Invalid tunnel configuration payload.");
                 return new TunnelResponse { Success = false, ErrorCode = "InvalidConfig", Message = "Invalid tunnel configuration." };
             }
 
-            _logger.Info($"[IPC:StartTunnel] Request validated for server '{config.ServerId}' ({config.ServerName}). Initiating routing engine...");
+            bool isOvpn = string.Equals(config.Protocol, VpnProtocol.OpenVpn, StringComparison.OrdinalIgnoreCase);
+            if (!isOvpn && string.IsNullOrEmpty(config.PrivateKey))
+            {
+                _logger.Warning("[IPC:StartTunnel] WireGuard requires private key.");
+                return new TunnelResponse { Success = false, ErrorCode = "InvalidConfig", Message = "WireGuard configuration requires private key." };
+            }
+
+            _logger.Info($"[IPC:StartTunnel] Request validated for server '{config.ServerId}' ({config.ServerName}, Protocol: {config.Protocol ?? "WireGuard"}). Initiating routing engine...");
             var (started, errorCode, errorMsg) = _engine.Start(config);
 
             if (started)
             {
-                // Start redirect proxy
-                _ = _proxy.StartAsync();
-
-                // Install dynamic WFP process filters
-                var discordPaths = new List<string>();
-                if (!string.IsNullOrEmpty(config.DiscordExecutablePath) && File.Exists(config.DiscordExecutablePath))
-                {
-                    discordPaths.Add(config.DiscordExecutablePath);
-                }
-                var locator = new DCScreenSharing.Core.Discord.DiscordLocator();
-                var discovered = locator.DiscoverAllInstallations();
-                foreach (var d in discovered)
-                {
-                    if (!string.IsNullOrEmpty(d.ExecutablePath) && File.Exists(d.ExecutablePath) && !discordPaths.Contains(d.ExecutablePath, StringComparer.OrdinalIgnoreCase))
-                    {
-                        discordPaths.Add(d.ExecutablePath);
-                    }
-                }
-                if (discordPaths.Count > 0)
-                {
-                    _wfpManager.InstallDiscordFilters(discordPaths);
-                }
-
                 _isConnected = true;
                 _activeServerId = config.ServerId;
                 _activeServerName = config.ServerName;
+                _activeProtocol = config.Protocol ?? "WireGuard";
                 _connectedSinceUtc = DateTime.UtcNow;
                 _lastError = null;
 
@@ -371,12 +347,11 @@ public class IpcServer
         try
         {
             _logger.Info("[IPC:StopTunnel] Stopping tunnel on IPC request...");
-            _wfpManager.RemoveAllFilters();
-            _proxy.Stop();
             _engine.Stop();
             _isConnected = false;
             _activeServerId = null;
             _activeServerName = null;
+            _activeProtocol = null;
             _connectedSinceUtc = null;
             _recovery.ClearState();
 
@@ -391,6 +366,7 @@ public class IpcServer
 
     private DiagnosticsData HandleGetDiagnostics()
     {
+        var stats = _engine.GetIsolationStats();
         return new DiagnosticsData
         {
             ServiceVersion = Constants.CurrentVersion,
@@ -398,10 +374,9 @@ public class IpcServer
             Is64Bit = Environment.Is64BitOperatingSystem,
             TunnelActive = _isConnected && _engine.IsRunning,
             ActiveServerId = _activeServerId,
-            ServiceUptimeSeconds = 0,
+            ServiceUptimeSeconds = stats.UptimeSeconds,
             NetworkInterfaces = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces().Select(n => n.Name).ToList(),
             SanitizedRecentLogs = _logger.GetRecentLogs(30).ToList()
         };
     }
 }
-

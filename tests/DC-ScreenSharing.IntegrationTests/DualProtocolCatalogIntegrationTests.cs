@@ -10,15 +10,15 @@ using Xunit;
 
 namespace DCScreenSharing.IntegrationTests;
 
-public class DualProtocolCatalogIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class DualProtocolCatalogIntegrationTests : IClassFixture<WebApplicationFactory<global::Program>>
 {
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly WebApplicationFactory<global::Program> _factory;
     private readonly HttpClient _client;
 
     private const string TestAdminApiKey = "test-admin-secret-key-12345";
     private readonly string _testStorageDir;
 
-    public DualProtocolCatalogIntegrationTests(WebApplicationFactory<Program> factory)
+    public DualProtocolCatalogIntegrationTests(WebApplicationFactory<global::Program> factory)
     {
         _testStorageDir = Path.Combine(Path.GetTempPath(), "DCSS_DualProtoTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testStorageDir);
