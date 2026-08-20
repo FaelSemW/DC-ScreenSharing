@@ -10,7 +10,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>DC-ScreenSharing — Admin Console</title>
-    <link rel="stylesheet" href="/admin/admin.css?v=2.0.0">
+    <link rel="stylesheet" href="/admin/admin.css?t=1724176000">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 </head>
 <body>
@@ -360,65 +360,84 @@
             </div>
         </div>
 
-        <!-- MAIN DASHBOARD VIEW -->
-        <div id="dashboard-view" class="dashboard-wrapper hidden">
-            <!-- Header Bar -->
-            <header class="app-header">
-                <div class="header-brand">
-                    <span class="logo-shield">🛡️</span>
-                    <span class="brand-title">DC-ScreenSharing <span class="badge badge-accent">Admin</span></span>
+        <!-- MAIN ADMIN LAYOUT VIEW -->
+        <div id="admin-view" class="admin-layout hidden">
+            <!-- Desktop Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-brand">
+                    <span class="logo-shield" style="font-size: 22px;">🛡️</span>
+                    <span class="brand-title">DCSS Admin</span>
                 </div>
 
-                <div class="header-actions">
-                    <button class="icon-btn" onclick="handleLogout()" title="Sign Out">
-                        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+                <nav class="nav-menu sidebar-nav">
+                    <a href="#dashboard" class="nav-item active" onclick="navigateTo('dashboard', event)">
+                        <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+                        <span>Dashboard</span>
+                    </a>
+                    <a href="#access-keys" class="nav-item" onclick="navigateTo('access-keys', event)">
+                        <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
+                        <span>Access Keys</span>
+                    </a>
+                    <a href="#clients" class="nav-item" onclick="navigateTo('clients', event)">
+                        <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+                        <span>Enrolled Clients</span>
+                    </a>
+                    <a href="#servers" class="nav-item" onclick="navigateTo('servers', event)">
+                        <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/></svg>
+                        <span>Servers (Dual Protocol)</span>
+                    </a>
+                    <a href="#generations" class="nav-item" onclick="navigateTo('generations', event)">
+                        <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                        <span>Generations</span>
+                    </a>
+                    <a href="#audit" class="nav-item" onclick="navigateTo('audit', event)">
+                        <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+                        <span>Audit Log</span>
+                    </a>
+                    <a href="#system" class="nav-item" onclick="navigateTo('system', event)">
+                        <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                        <span>System Info</span>
+                    </a>
+                </nav>
+
+                <div class="sidebar-footer">
+                    <button class="logout-btn" onclick="handleLogout()">
+                        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+                        <span>Sign Out</span>
                     </button>
                 </div>
-            </header>
+            </aside>
 
-            <!-- Main Layout with Desktop Sidebar & Mobile Content -->
-            <main class="app-main">
-                <!-- Desktop Sidebar -->
-                <aside class="sidebar">
-                    <nav class="sidebar-nav">
-                        <a href="#dashboard" class="nav-item active" onclick="navigateTo('dashboard', event)">
-                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
-                            <span>Dashboard</span>
-                        </a>
-                        <a href="#access-keys" class="nav-item" onclick="navigateTo('access-keys', event)">
-                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
-                            <span>Access Keys</span>
-                        </a>
-                        <a href="#clients" class="nav-item" onclick="navigateTo('clients', event)">
-                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
-                            <span>Enrolled Clients</span>
-                        </a>
-                        <a href="#servers" class="nav-item" onclick="navigateTo('servers', event)">
-                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/></svg>
-                            <span>Servers (Dual Protocol)</span>
-                        </a>
-                        <a href="#generations" class="nav-item" onclick="navigateTo('generations', event)">
-                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
-                            <span>Generations</span>
-                        </a>
-                        <a href="#audit" class="nav-item" onclick="navigateTo('audit', event)">
-                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
-                            <span>Audit Log</span>
-                        </a>
-                        <a href="#system" class="nav-item" onclick="navigateTo('system', event)">
-                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-                            <span>System Info</span>
-                        </a>
-                    </nav>
-                </aside>
+            <!-- Main Content Area -->
+            <main class="main-content">
+                <!-- Top Header Bar -->
+                <header class="top-header">
+                    <div class="header-left">
+                        <div class="brand-mobile">
+                            <span class="logo-shield">🛡️</span>
+                            <span>DCSS Admin</span>
+                        </div>
+                        <h1 id="page-title" class="page-title">Dashboard</h1>
+                    </div>
 
-                <!-- Page Content Area -->
+                    <div class="header-right">
+                        <span class="status-indicator">
+                            <span class="status-dot"></span>
+                            <span class="status-text">Production Online</span>
+                        </span>
+                        <button class="icon-btn ml-2" onclick="handleLogout()" title="Sign Out">
+                            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+                        </button>
+                    </div>
+                </header>
+
+                <!-- Page Content Container -->
                 <div class="content-container">
                     <!-- SECTION: DASHBOARD -->
                     <section id="section-dashboard" class="page-section">
                         <div class="section-toolbar">
-                            <span class="toolbar-info">Overview & Metrics</span>
-                            <button class="btn btn-secondary" onclick="loadDashboard()">Refresh</button>
+                            <span class="toolbar-info">Overview & Platform Metrics</span>
+                            <button class="btn btn-secondary btn-sm" onclick="loadDashboard()">Refresh</button>
                         </div>
 
                         <div class="metrics-grid mt-3">
@@ -490,7 +509,7 @@
                     <section id="section-clients" class="page-section hidden">
                         <div class="section-toolbar">
                             <div class="filter-group">
-                                <input type="text" id="client-search" class="form-control" placeholder="Search by Client ID or IP..." oninput="filterClients()">
+                                <input type="text" id="client-search" class="form-control" placeholder="Search by Client ID, key, or IP..." oninput="filterClients()">
                                 <select id="client-status-filter" class="form-control" onchange="filterClients()">
                                     <option value="">All Statuses</option>
                                     <option value="active">Active Only</option>
@@ -627,7 +646,7 @@
         </div>
     </div>
 
-    <!-- Scripts with Cache-Busting Query -->
-    <script src="/admin/admin.js?v=2.0.0"></script>
+    <!-- Script with Dynamic Cache Busting -->
+    <script src="/admin/admin.js?t=1724176000"></script>
 </body>
 </html>

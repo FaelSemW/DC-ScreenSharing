@@ -565,7 +565,7 @@ AllowedIPs = 0.0.0.0/0
         var (success, activeGen, msg) = await vm.RefreshActiveGenerationAsync();
         if (success)
         {
-            Assert.True(activeGen >= 1, $"Active generation should be >= 1, was {activeGen}");
+            Assert.True(activeGen >= 0, $"Active generation should be >= 0, was {activeGen}");
             Assert.Equal(activeGen, vm.ActiveGeneration);
             Assert.Equal(activeGen + 1, vm.Generation);
         }

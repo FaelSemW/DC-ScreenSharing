@@ -535,6 +535,17 @@ a:hover {
     display: flex;
     min-height: 100vh;
     min-height: 100dvh;
+    width: 100%;
+}
+
+.page-section {
+    display: block;
+    width: 100%;
+    animation: fadeIn 0.15s ease-in-out;
+}
+
+.page-section.hidden {
+    display: none !important;
 }
 
 .sidebar {
