@@ -104,4 +104,17 @@ public class ApplicationUpdateServiceTests
         Assert.NotNull(checksumAsset);
         Assert.Equal("DC-ScreenSharing-Setup-1.0.2.exe.sha256", checksumAsset.Name);
     }
+
+    [Fact]
+    public async Task CheckForUpdatesAsync_FromV107_DetectsV108Release()
+    {
+        var updateService = new ApplicationUpdateService(new TestLogger());
+
+        var result = await updateService.CheckForUpdatesAsync(new Version(1, 0, 7));
+
+        Assert.True(result.UpdateAvailable);
+        Assert.Equal(new Version(1, 0, 8), result.LatestVersion);
+        Assert.NotNull(result.DownloadUrl);
+        Assert.Contains("DC-ScreenSharing-Setup-1.0.8.exe", result.DownloadUrl);
+    }
 }

@@ -25,6 +25,7 @@ public class FullLifecycleIntegrationTests : IClassFixture<WebApplicationFactory
     public FullLifecycleIntegrationTests(WebApplicationFactory<global::Program> factory)
     {
         _testStorageDir = Path.Combine(Path.GetTempPath(), "DCSS_ProfileService_Test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_testStorageDir);
         Environment.SetEnvironmentVariable("ProfileService__StoragePath", _testStorageDir);
         Environment.SetEnvironmentVariable("ADMIN_API_KEY", "test-admin-secret-key-12345");
 
