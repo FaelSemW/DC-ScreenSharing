@@ -4,6 +4,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DCScreenSharing.Core.Profiles;
+using DCScreenSharing.Networking;
+using DCScreenSharing.Shared.Contracts;
+using DCScreenSharing.Shared.Logging;
 using DCSS.ProfileCollector.Models;
 
 namespace DCSS.ProfileCollector.Services;
@@ -46,9 +49,18 @@ public class ProfileStorageService
         return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "configs");
     }
 
-    public static string GetRegionFolder(string configsRoot, string regionCode)
+    public static string GetRegionFolder(string configsRoot, string regionCode, string provider = ProviderConstants.ProtonVpn)
     {
-        var folder = Path.Combine(configsRoot, regionCode.ToUpperInvariant());
+        string folder;
+        if (string.Equals(provider, ProviderConstants.ProtonVpn, StringComparison.OrdinalIgnoreCase))
+        {
+            folder = Path.Combine(configsRoot, "Proton", regionCode.ToUpperInvariant());
+        }
+        else
+        {
+            folder = Path.Combine(configsRoot, regionCode.ToUpperInvariant());
+        }
+
         Directory.CreateDirectory(folder);
         return folder;
     }
@@ -130,7 +142,7 @@ public class ProfileStorageService
                 return (false, null, "Missing or invalid [Interface] PrivateKey.");
             }
 
-            if (string.IsNullOrWhiteSpace(parsed.Address))
+            if (parsed.Addresses.Count == 0 && string.IsNullOrWhiteSpace(parsed.Address))
             {
                 return (false, null, "Missing or invalid [Interface] Address.");
             }
@@ -150,6 +162,38 @@ public class ProfileStorageService
                 return (false, null, $"Invalid port number ({parsed.Port}).");
             }
 
+            // Real Engine Validation with sing-box 1.13.19
+            var tunnelConfig = new TunnelConfiguration
+            {
+                ServerId = "collector-val",
+                ServerName = "Validation Server",
+                Endpoint = parsed.Endpoint,
+                Port = parsed.Port,
+                Addresses = new List<string>(parsed.Addresses),
+                DnsServers = new List<string>(parsed.DnsServers),
+                AllowedIpsList = new List<string>(parsed.AllowedIpsList),
+                PrivateKey = parsed.PrivateKey,
+                PeerPublicKey = parsed.PeerPublicKey,
+                PersistentKeepalive = parsed.PersistentKeepalive,
+                Mtu = parsed.Mtu
+            };
+
+            var tempValDir = Path.Combine(Path.GetTempPath(), "DCSS_Val_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempValDir);
+            try
+            {
+                var engine = new ProcessRoutingEngine(new FileLogger(tempValDir), tempValDir);
+                var (isEngineValid, engineError) = engine.ValidateRuntimeConfiguration(tunnelConfig);
+                if (!isEngineValid)
+                {
+                    return (false, null, $"sing-box 1.13.19 configuration validation failed: {engineError}");
+                }
+            }
+            finally
+            {
+                try { Directory.Delete(tempValDir, true); } catch { }
+            }
+
             return (true, parsed, string.Empty);
         }
         catch (Exception ex)
@@ -163,7 +207,8 @@ public class ProfileStorageService
         string targetFolder,
         string regionCode,
         string serverName,
-        DateTime? expiresAtUtc = null)
+        DateTime? expiresAtUtc = null,
+        string provider = ProviderConstants.ProtonVpn)
     {
         var validation = ValidateConfigContent(rawContent);
         if (!validation.IsValid || validation.Config == null)
@@ -222,13 +267,14 @@ public class ProfileStorageService
         // Record in inventory (without private keys)
         RecordInventoryItem(new InventoryItem
         {
+            Provider = provider,
             Filename = filename,
             Region = regionCode.ToUpperInvariant(),
             Server = serverName,
             GeneratedUtc = DateTime.UtcNow,
             ValidationStatus = "Valid",
             DerivedPublicIdentityHash = identityHash,
-            ExpiresAtUtc = expiresAtUtc ?? DateTime.UtcNow.AddDays(7)
+            ExpiresAtUtc = expiresAtUtc
         });
 
         return (true, finalPath, filename, identityHash, "Ready", false);
@@ -254,8 +300,8 @@ public class ProfileStorageService
                 try
                 {
                     var text = File.ReadAllText(file);
-                    var (isValid, parsed, _) = ValidateConfigContent(text);
-                    if (isValid && parsed != null)
+                    var parsed = WireGuardConfParser.Parse(text);
+                    if (!string.IsNullOrWhiteSpace(parsed.PeerPublicKey) && !string.IsNullOrWhiteSpace(parsed.Endpoint))
                     {
                         var h = DerivePublicIdentityHash(parsed.PeerPublicKey, parsed.Address, parsed.Endpoint, parsed.Port);
                         if (string.Equals(h, identityHash, StringComparison.OrdinalIgnoreCase))

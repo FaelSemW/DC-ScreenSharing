@@ -25,6 +25,10 @@ public class MaintainerServerItem : INotifyPropertyChanged
     private string _dns = "1.1.1.1, 8.8.8.8";
     private int _mtu = 1420;
     private string _allowedIps = "0.0.0.0/0, ::/0";
+    private List<string> _addresses = new();
+    private List<string> _dnsServers = new();
+    private List<string> _allowedIpsList = new();
+    private int _persistentKeepalive = 25;
     private string? _sourceConfPath;
     private string _status = "Ready";
 
@@ -35,11 +39,15 @@ public class MaintainerServerItem : INotifyPropertyChanged
     public string Endpoint { get => _endpoint; set => SetProperty(ref _endpoint, value); }
     public int Port { get => _port; set => SetProperty(ref _port, value); }
     public string Address { get => _address; set => SetProperty(ref _address, value); }
+    public List<string> Addresses { get => _addresses; set => SetProperty(ref _addresses, value); }
     public string PrivateKey { get => _privateKey; set => SetProperty(ref _privateKey, value); }
     public string PeerPublicKey { get => _peerPublicKey; set => SetProperty(ref _peerPublicKey, value); }
     public string Dns { get => _dns; set => SetProperty(ref _dns, value); }
+    public List<string> DnsServers { get => _dnsServers; set => SetProperty(ref _dnsServers, value); }
     public int Mtu { get => _mtu; set => SetProperty(ref _mtu, value); }
     public string AllowedIps { get => _allowedIps; set => SetProperty(ref _allowedIps, value); }
+    public List<string> AllowedIpsList { get => _allowedIpsList; set => SetProperty(ref _allowedIpsList, value); }
+    public int PersistentKeepalive { get => _persistentKeepalive; set => SetProperty(ref _persistentKeepalive, value); }
     public string? SourceConfPath { get => _sourceConfPath; set => SetProperty(ref _sourceConfPath, value); }
     public string Status { get => _status; set => SetProperty(ref _status, value); }
 
@@ -500,9 +508,13 @@ public class MaintainerViewModel : INotifyPropertyChanged
         server.Endpoint = parsed.Endpoint;
         server.Port = parsed.Port;
         server.Address = parsed.Address;
+        server.Addresses = new List<string>(parsed.Addresses);
         server.Dns = parsed.Dns;
+        server.DnsServers = new List<string>(parsed.DnsServers);
         server.Mtu = parsed.Mtu;
         server.AllowedIps = parsed.AllowedIps;
+        server.AllowedIpsList = new List<string>(parsed.AllowedIpsList);
+        server.PersistentKeepalive = parsed.PersistentKeepalive;
 
         if (!string.IsNullOrEmpty(confFilePath))
         {
@@ -651,11 +663,15 @@ public class MaintainerViewModel : INotifyPropertyChanged
                     Endpoint = s.Endpoint,
                     Port = s.Port,
                     Address = s.Address,
+                    Addresses = new List<string>(s.Addresses),
                     PrivateKey = s.PrivateKey,
                     PeerPublicKey = s.PeerPublicKey,
                     Dns = s.Dns,
+                    DnsServers = new List<string>(s.DnsServers),
                     Mtu = s.Mtu,
-                    AllowedIps = s.AllowedIps
+                    AllowedIps = s.AllowedIps,
+                    AllowedIpsList = new List<string>(s.AllowedIpsList),
+                    PersistentKeepalive = s.PersistentKeepalive
                 }
             };
 

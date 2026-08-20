@@ -11,22 +11,26 @@ namespace DCSS.ProfileCollector.ViewModels;
 
 public class CollectorViewModel : INotifyPropertyChanged
 {
-    private readonly VpnBookAutomationService _automationService;
+    private readonly ProtonVpnAutomationService _protonService;
+    private readonly VpnBookAutomationService _vpnBookService;
     private readonly ProfileStorageService _storageService;
     private CancellationTokenSource? _cts;
 
-    private VpnBookRegion? _selectedRegion;
+    private string _selectedProvider = ProviderConstants.ProtonVpn;
+    private CollectorRegion? _selectedRegion;
     private string _selectedServerMode = "Automatic";
     private PortOption? _selectedPort;
-    private int _quantity = 10;
+    private int _quantity = 5;
     private string _outputFolder = string.Empty;
-    private bool _acceptConditions = false;
+    private bool _acceptConditions = true;
     private bool _isGenerating = false;
     private bool _isPaused = false;
+    private bool _needsOperatorAttention = false;
+    private string _operatorAttentionMessage = string.Empty;
     private string _statusMessage = "Ready";
     private string _progressText = "0 / 0 generated";
     private int _progressValue = 0;
-    private int _progressMax = 10;
+    private int _progressMax = 5;
     private bool _showSummary = false;
     private int _summaryRequested;
     private int _summaryGenerated;
@@ -37,13 +41,41 @@ public class CollectorViewModel : INotifyPropertyChanged
     private string _resumeRecommendationText = string.Empty;
     private bool _canResume = false;
 
-    public ObservableCollection<VpnBookRegion> AvailableRegions { get; } = new();
-    public ObservableCollection<string> ServerModes { get; } = new() { "Automatic", "Server 1", "Server 2" };
+    private ProtonOptions _protonSettings = new();
+
+    public ObservableCollection<string> AvailableProviders { get; } = new() { ProviderConstants.ProtonVpn, ProviderConstants.VpnBook };
+    public ObservableCollection<CollectorRegion> AvailableRegions { get; } = new();
+    public ObservableCollection<string> ServerModes { get; } = new() { "Automatic", "Recommended", "Server 1", "Server 2" };
     public ObservableCollection<PortOption> AvailablePorts { get; } = new();
     public ObservableCollection<ProfileResultItem> Results { get; } = new();
     public ObservableCollection<MultiRegionPlanItem> MultiRegionPlan { get; } = new();
 
-    public VpnBookRegion? SelectedRegion
+    public string SelectedProvider
+    {
+        get => _selectedProvider;
+        set
+        {
+            if (SetProperty(ref _selectedProvider, value))
+            {
+                OnPropertyChanged(nameof(IsProtonSelected));
+                OnPropertyChanged(nameof(IsVpnBookSelected));
+                UpdateRegionsForProvider();
+                UpdateDefaultOutputFolder();
+                CheckExistingConfigs();
+            }
+        }
+    }
+
+    public bool IsProtonSelected => string.Equals(SelectedProvider, ProviderConstants.ProtonVpn, StringComparison.OrdinalIgnoreCase);
+    public bool IsVpnBookSelected => string.Equals(SelectedProvider, ProviderConstants.VpnBook, StringComparison.OrdinalIgnoreCase);
+
+    public ProtonOptions ProtonSettings
+    {
+        get => _protonSettings;
+        set => SetProperty(ref _protonSettings, value);
+    }
+
+    public CollectorRegion? SelectedRegion
     {
         get => _selectedRegion;
         set
@@ -114,6 +146,18 @@ public class CollectorViewModel : INotifyPropertyChanged
     {
         get => _isPaused;
         set => SetProperty(ref _isPaused, value);
+    }
+
+    public bool NeedsOperatorAttention
+    {
+        get => _needsOperatorAttention;
+        set => SetProperty(ref _needsOperatorAttention, value);
+    }
+
+    public string OperatorAttentionMessage
+    {
+        get => _operatorAttentionMessage;
+        set => SetProperty(ref _operatorAttentionMessage, value);
     }
 
     public string StatusMessage
@@ -196,41 +240,61 @@ public class CollectorViewModel : INotifyPropertyChanged
 
     public bool CanStart => !IsGenerating;
 
-    public CollectorViewModel(VpnBookAutomationService? automationService = null, ProfileStorageService? storageService = null)
+    public CollectorViewModel(
+        ProtonVpnAutomationService? protonService = null,
+        VpnBookAutomationService? vpnBookService = null,
+        ProfileStorageService? storageService = null)
     {
-        _automationService = automationService ?? new VpnBookAutomationService();
+        _protonService = protonService ?? new ProtonVpnAutomationService();
+        _vpnBookService = vpnBookService ?? new VpnBookAutomationService();
         _storageService = storageService ?? new ProfileStorageService();
 
-        // Populate defaults
-        foreach (var r in VpnBookAutomationService.GetDefaultRegions())
-        {
-            AvailableRegions.Add(r);
-        }
+        UpdateRegionsForProvider();
 
         foreach (var p in VpnBookAutomationService.GetDefaultPorts())
         {
             AvailablePorts.Add(p);
         }
 
-        SelectedRegion = AvailableRegions.FirstOrDefault();
         SelectedPort = AvailablePorts.FirstOrDefault();
 
         // Multi-Region plan defaults
-        MultiRegionPlan.Add(new MultiRegionPlanItem { RegionCode = "US", DisplayName = "United States", Quantity = 20 });
-        MultiRegionPlan.Add(new MultiRegionPlanItem { RegionCode = "CA", DisplayName = "Canada", Quantity = 10 });
-        MultiRegionPlan.Add(new MultiRegionPlanItem { RegionCode = "UK", DisplayName = "United Kingdom", Quantity = 15 });
-        MultiRegionPlan.Add(new MultiRegionPlanItem { RegionCode = "DE", DisplayName = "Germany", Quantity = 10 });
-        MultiRegionPlan.Add(new MultiRegionPlanItem { RegionCode = "FR", DisplayName = "France", Quantity = 10 });
+        MultiRegionPlan.Add(new MultiRegionPlanItem { RegionCode = "US", DisplayName = "United States", Quantity = 5 });
+        MultiRegionPlan.Add(new MultiRegionPlanItem { RegionCode = "CA", DisplayName = "Canada", Quantity = 3 });
+        MultiRegionPlan.Add(new MultiRegionPlanItem { RegionCode = "UK", DisplayName = "United Kingdom", Quantity = 3 });
+        MultiRegionPlan.Add(new MultiRegionPlanItem { RegionCode = "NL", DisplayName = "Netherlands", Quantity = 3 });
+        MultiRegionPlan.Add(new MultiRegionPlanItem { RegionCode = "DE", DisplayName = "Germany", Quantity = 3 });
 
         UpdateDefaultOutputFolder();
         CheckExistingConfigs();
+    }
+
+    private void UpdateRegionsForProvider()
+    {
+        AvailableRegions.Clear();
+        if (IsProtonSelected)
+        {
+            foreach (var r in ProtonVpnAutomationService.GetDefaultRegions())
+            {
+                AvailableRegions.Add(r);
+            }
+        }
+        else
+        {
+            foreach (var r in VpnBookAutomationService.GetDefaultRegions())
+            {
+                AvailableRegions.Add(r);
+            }
+        }
+
+        SelectedRegion = AvailableRegions.FirstOrDefault();
     }
 
     private void UpdateDefaultOutputFolder()
     {
         if (SelectedRegion == null) return;
         var configsRoot = ProfileStorageService.GetDefaultConfigsRoot();
-        OutputFolder = ProfileStorageService.GetRegionFolder(configsRoot, SelectedRegion.Code);
+        OutputFolder = ProfileStorageService.GetRegionFolder(configsRoot, SelectedRegion.Code, SelectedProvider);
     }
 
     public void CheckExistingConfigs()
@@ -272,6 +336,21 @@ public class CollectorViewModel : INotifyPropertyChanged
         }
     }
 
+    public async Task GenerateTestProfileAsync()
+    {
+        // Performance diagnostic mode: generate exactly 1 profile
+        var origQuantity = Quantity;
+        Quantity = 1;
+        try
+        {
+            await StartBatchAsync();
+        }
+        finally
+        {
+            Quantity = origQuantity;
+        }
+    }
+
     public async Task StartBatchAsync()
     {
         if (!AcceptConditions)
@@ -286,12 +365,6 @@ public class CollectorViewModel : INotifyPropertyChanged
             return;
         }
 
-        if (SelectedPort == null)
-        {
-            StatusMessage = "Please select a port.";
-            return;
-        }
-
         if (string.IsNullOrWhiteSpace(OutputFolder))
         {
             StatusMessage = "Please select an output folder.";
@@ -300,6 +373,7 @@ public class CollectorViewModel : INotifyPropertyChanged
 
         IsGenerating = true;
         IsPaused = false;
+        NeedsOperatorAttention = false;
         ShowSummary = false;
         Results.Clear();
 
@@ -307,14 +381,15 @@ public class CollectorViewModel : INotifyPropertyChanged
         var token = _cts.Token;
 
         var region = SelectedRegion;
-        var port = SelectedPort.Port;
+        var port = SelectedPort?.Port ?? "51820";
         var targetFolder = OutputFolder;
         var quantity = Quantity;
+        var provider = SelectedProvider;
 
         ProgressMax = quantity;
         ProgressValue = 0;
         ProgressText = $"0 / {quantity} generated";
-        StatusMessage = $"Starting generation of {quantity} profiles for {region.DisplayName}...";
+        StatusMessage = $"Starting generation of {quantity} profiles ({provider} - {region.DisplayName})...";
 
         int generated = 0;
         int valid = 0;
@@ -327,20 +402,55 @@ public class CollectorViewModel : INotifyPropertyChanged
             {
                 if (token.IsCancellationRequested) break;
 
-                // Pick server based on mode
-                var server = PickServer(region, i, SelectedServerMode);
-                StatusMessage = $"[{i + 1}/{quantity}] Requesting configuration from {server.Name}...";
+                var configName = $"DCSS-{region.Code}-{i + 1:D3}";
+                StatusMessage = $"[{i + 1}/{quantity}] Requesting configuration {configName}...";
 
-                var result = await _automationService.GenerateSingleProfileAsync(
-                    server,
-                    port,
-                    status => StatusMessage = $"[{i + 1}/{quantity}] {status}",
-                    token);
+                ProviderProfileResult result;
+
+                if (string.Equals(provider, ProviderConstants.ProtonVpn, StringComparison.OrdinalIgnoreCase))
+                {
+                    var options = new ProfileGenerationOptions
+                    {
+                        Provider = ProviderConstants.ProtonVpn,
+                        Region = region,
+                        ServerMode = SelectedServerMode,
+                        Port = port,
+                        ConfigurationName = configName,
+                        ProtonSettings = ProtonSettings
+                    };
+
+                    result = await _protonService.GenerateSingleProfileAsync(
+                        options,
+                        msg => StatusMessage = $"[{i + 1}/{quantity}] {msg}",
+                        token);
+                }
+                else
+                {
+                    var vpnBookServer = PickVpnBookServer(region, i, SelectedServerMode);
+                    var vpnBookResult = await _vpnBookService.GenerateSingleProfileAsync(
+                        vpnBookServer,
+                        port,
+                        msg => StatusMessage = $"[{i + 1}/{quantity}] {msg}",
+                        token);
+
+                    result = new ProviderProfileResult
+                    {
+                        Success = vpnBookResult.Success,
+                        ConfigContent = vpnBookResult.ConfigContent,
+                        ServerName = vpnBookResult.ServerName,
+                        ExpiresAtUtc = vpnBookResult.ExpiresAtUtc,
+                        ErrorMessage = vpnBookResult.ErrorMessage,
+                        RequiresOperatorAttention = vpnBookResult.RequiresOperatorAttention,
+                        OperatorAttentionReason = vpnBookResult.ErrorMessage
+                    };
+                }
 
                 if (result.RequiresOperatorAttention)
                 {
                     IsPaused = true;
-                    StatusMessage = result.ErrorMessage;
+                    NeedsOperatorAttention = true;
+                    OperatorAttentionMessage = result.OperatorAttentionReason;
+                    StatusMessage = result.OperatorAttentionReason;
                     break;
                 }
 
@@ -351,8 +461,9 @@ public class CollectorViewModel : INotifyPropertyChanged
                         result.ConfigContent,
                         targetFolder,
                         region.Code,
-                        server.Name,
-                        result.ExpiresAtUtc);
+                        result.ServerName,
+                        result.ExpiresAtUtc,
+                        provider);
 
                     if (saveResult.Success)
                     {
@@ -363,31 +474,32 @@ public class CollectorViewModel : INotifyPropertyChanged
                         Results.Insert(0, new ProfileResultItem
                         {
                             Filename = saveResult.Filename,
+                            Provider = provider,
                             Region = region.Code,
-                            ServerName = server.Name,
+                            ServerName = result.ServerName,
                             Status = "Ready",
                             ExpiresAtUtc = result.ExpiresAtUtc,
                             DerivedPublicKeyHash = saveResult.IdentityHash
                         });
 
-                        StatusMessage = $"Generated {saveResult.Filename} ({server.Name}) successfully.";
+                        StatusMessage = $"Generated {saveResult.Filename} ({result.ServerName}) successfully (sing-box validated).";
                     }
                     else if (saveResult.IsDuplicate)
                     {
                         duplicates++;
                         Results.Insert(0, new ProfileResultItem
                         {
-                            Filename = $"[Duplicate] ({server.Name})",
+                            Filename = $"[Duplicate] ({result.ServerName})",
+                            Provider = provider,
                             Region = region.Code,
-                            ServerName = server.Name,
+                            ServerName = result.ServerName,
                             Status = "Duplicate",
                             StatusDetail = saveResult.Message,
                             DerivedPublicKeyHash = saveResult.IdentityHash
                         });
 
                         StatusMessage = $"Duplicate profile identity detected. Quarantined. Continuing...";
-                        // Duplicates do NOT count towards valid quantity, so decrement i to retry with next server
-                        i--;
+                        i--; // Retrying slot
                     }
                     else
                     {
@@ -395,8 +507,9 @@ public class CollectorViewModel : INotifyPropertyChanged
                         Results.Insert(0, new ProfileResultItem
                         {
                             Filename = $"[Validation Failed]",
+                            Provider = provider,
                             Region = region.Code,
-                            ServerName = server.Name,
+                            ServerName = result.ServerName,
                             Status = "Failed",
                             StatusDetail = saveResult.Message
                         });
@@ -409,18 +522,19 @@ public class CollectorViewModel : INotifyPropertyChanged
                     Results.Insert(0, new ProfileResultItem
                     {
                         Filename = $"[Generation Failed]",
+                        Provider = provider,
                         Region = region.Code,
-                        ServerName = server.Name,
+                        ServerName = result.ServerName,
                         Status = "Failed",
                         StatusDetail = result.ErrorMessage
                     });
-                    StatusMessage = $"Generation failed for {server.Name}: {result.ErrorMessage}";
+                    StatusMessage = $"Generation failed: {result.ErrorMessage}";
                 }
 
-                // Configurable respectful delay between generations (3-5 seconds)
+                // Respectful pause between creations (3-5s)
                 if (i < quantity - 1 && !token.IsCancellationRequested)
                 {
-                    StatusMessage = $"Waiting 4s before next generation to respect provider rate limits...";
+                    StatusMessage = $"Waiting 4s before next generation...";
                     await Task.Delay(4000, token);
                 }
             }
@@ -438,7 +552,6 @@ public class CollectorViewModel : INotifyPropertyChanged
             IsGenerating = false;
             CheckExistingConfigs();
 
-            // Set summary
             SummaryRequested = quantity;
             SummaryGenerated = generated;
             SummaryValid = valid;
@@ -459,6 +572,7 @@ public class CollectorViewModel : INotifyPropertyChanged
 
         IsGenerating = true;
         IsPaused = false;
+        NeedsOperatorAttention = false;
         ShowSummary = false;
         Results.Clear();
 
@@ -466,7 +580,8 @@ public class CollectorViewModel : INotifyPropertyChanged
         var token = _cts.Token;
 
         var configsRoot = ProfileStorageService.GetDefaultConfigsRoot();
-        var port = SelectedPort?.Port ?? "443";
+        var port = SelectedPort?.Port ?? "51820";
+        var provider = SelectedProvider;
 
         try
         {
@@ -478,7 +593,7 @@ public class CollectorViewModel : INotifyPropertyChanged
                 var region = AvailableRegions.FirstOrDefault(r => string.Equals(r.Code, item.RegionCode, StringComparison.OrdinalIgnoreCase));
                 if (region == null) continue;
 
-                var folder = ProfileStorageService.GetRegionFolder(configsRoot, region.Code);
+                var folder = ProfileStorageService.GetRegionFolder(configsRoot, region.Code, provider);
                 item.Status = "In Progress";
 
                 ProgressMax = item.Quantity;
@@ -492,19 +607,54 @@ public class CollectorViewModel : INotifyPropertyChanged
                 {
                     if (token.IsCancellationRequested) break;
 
-                    var server = PickServer(region, i, "Automatic");
-                    var result = await _automationService.GenerateSingleProfileAsync(
-                        server,
-                        port,
-                        msg => StatusMessage = $"[{region.Code} {i + 1}/{item.Quantity}] {msg}",
-                        token);
+                    var configName = $"DCSS-{region.Code}-{i + 1:D3}";
+                    ProviderProfileResult result;
+
+                    if (string.Equals(provider, ProviderConstants.ProtonVpn, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var options = new ProfileGenerationOptions
+                        {
+                            Provider = ProviderConstants.ProtonVpn,
+                            Region = region,
+                            ServerMode = "Automatic",
+                            Port = port,
+                            ConfigurationName = configName,
+                            ProtonSettings = ProtonSettings
+                        };
+
+                        result = await _protonService.GenerateSingleProfileAsync(
+                            options,
+                            msg => StatusMessage = $"[{region.Code} {i + 1}/{item.Quantity}] {msg}",
+                            token);
+                    }
+                    else
+                    {
+                        var vpnBookServer = PickVpnBookServer(region, i, "Automatic");
+                        var vpnBookResult = await _vpnBookService.GenerateSingleProfileAsync(
+                            vpnBookServer,
+                            port,
+                            msg => StatusMessage = $"[{region.Code} {i + 1}/{item.Quantity}] {msg}",
+                            token);
+
+                        result = new ProviderProfileResult
+                        {
+                            Success = vpnBookResult.Success,
+                            ConfigContent = vpnBookResult.ConfigContent,
+                            ServerName = vpnBookResult.ServerName,
+                            ExpiresAtUtc = vpnBookResult.ExpiresAtUtc,
+                            ErrorMessage = vpnBookResult.ErrorMessage,
+                            RequiresOperatorAttention = vpnBookResult.RequiresOperatorAttention,
+                            OperatorAttentionReason = vpnBookResult.ErrorMessage
+                        };
+                    }
 
                     if (result.RequiresOperatorAttention)
                     {
                         IsPaused = true;
-                        StatusMessage = result.ErrorMessage;
-                        item.Status = "Paused";
-                        return;
+                        NeedsOperatorAttention = true;
+                        OperatorAttentionMessage = result.OperatorAttentionReason;
+                        item.Status = "Attention Required";
+                        break;
                     }
 
                     if (result.Success && !string.IsNullOrWhiteSpace(result.ConfigContent))
@@ -513,8 +663,9 @@ public class CollectorViewModel : INotifyPropertyChanged
                             result.ConfigContent,
                             folder,
                             region.Code,
-                            server.Name,
-                            result.ExpiresAtUtc);
+                            result.ServerName,
+                            result.ExpiresAtUtc,
+                            provider);
 
                         if (saveResult.Success)
                         {
@@ -525,16 +676,13 @@ public class CollectorViewModel : INotifyPropertyChanged
                             Results.Insert(0, new ProfileResultItem
                             {
                                 Filename = saveResult.Filename,
+                                Provider = provider,
                                 Region = region.Code,
-                                ServerName = server.Name,
+                                ServerName = result.ServerName,
                                 Status = "Ready",
                                 ExpiresAtUtc = result.ExpiresAtUtc,
                                 DerivedPublicKeyHash = saveResult.IdentityHash
                             });
-                        }
-                        else if (saveResult.IsDuplicate)
-                        {
-                            i--; // retry with next server
                         }
                     }
 
@@ -544,73 +692,42 @@ public class CollectorViewModel : INotifyPropertyChanged
                     }
                 }
 
-                item.Status = $"Done ({validForRegion}/{item.Quantity})";
+                item.Status = validForRegion >= item.Quantity ? "Completed" : $"Partial ({validForRegion}/{item.Quantity})";
             }
         }
         catch (OperationCanceledException)
         {
-            StatusMessage = "Multi-region batch cancelled by operator.";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"Multi-region batch stopped: {ex.Message}";
+            StatusMessage = "Multi-region job cancelled.";
         }
         finally
         {
             IsGenerating = false;
-            CheckExistingConfigs();
-            ShowSummary = true;
-            SummaryOutputPath = configsRoot;
         }
+    }
+
+    public async Task ContinueAfterAttentionAsync()
+    {
+        NeedsOperatorAttention = false;
+        IsPaused = false;
+        StatusMessage = "Resuming generation...";
+        await StartBatchAsync();
     }
 
     public void CancelBatch()
     {
         _cts?.Cancel();
-        StatusMessage = "Cancelling batch generation...";
-    }
-
-    private VpnBookServer PickServer(VpnBookRegion region, int iterationIndex, string mode)
-    {
-        if (region.Servers.Count == 0)
-        {
-            return new VpnBookServer { Id = "us16", Name = "Server 1", Hostname = "us16.vpnbook.com", CountryCode = region.Code, CountryName = region.DisplayName };
-        }
-
-        if (mode.Contains("1") && region.Servers.Count > 0)
-        {
-            return region.Servers[0];
-        }
-
-        if (mode.Contains("2") && region.Servers.Count > 1)
-        {
-            return region.Servers[1];
-        }
-
-        // Automatic: alternate across available servers
-        return region.Servers[iterationIndex % region.Servers.Count];
+        StatusMessage = "Cancelling current batch operation...";
     }
 
     public void OpenOutputFolder()
     {
-        try
+        if (!string.IsNullOrWhiteSpace(OutputFolder) && Directory.Exists(OutputFolder))
         {
-            var target = !string.IsNullOrWhiteSpace(SummaryOutputPath) && Directory.Exists(SummaryOutputPath)
-                ? SummaryOutputPath
-                : OutputFolder;
-
-            if (Directory.Exists(target))
+            Process.Start(new ProcessStartInfo
             {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = target,
-                    UseShellExecute = true
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"Failed to open folder: {ex.Message}";
+                FileName = OutputFolder,
+                UseShellExecute = true
+            });
         }
     }
 
@@ -618,61 +735,73 @@ public class CollectorViewModel : INotifyPropertyChanged
     {
         try
         {
-            // Find Maintainer executable
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            var maintainerPath = Path.Combine(baseDir, "DCSS.Maintainer.exe");
-
-            if (!File.Exists(maintainerPath))
-            {
-                var parent = Directory.GetParent(baseDir);
-                while (parent != null)
-                {
-                    var check = Path.Combine(parent.FullName, "dist", "maintainer", "DCSS.Maintainer.exe");
-                    if (File.Exists(check))
-                    {
-                        maintainerPath = check;
-                        break;
-                    }
-                    var check2 = Path.Combine(parent.FullName, "tools", "DCSS.Maintainer", "bin", "Debug", "net8.0-windows", "DCSS.Maintainer.exe");
-                    if (File.Exists(check2))
-                    {
-                        maintainerPath = check2;
-                        break;
-                    }
-                    parent = parent.Parent;
-                }
-            }
-
-            if (File.Exists(maintainerPath))
+            // Launch or notify DCSS.Maintainer
+            var maintainerExe = FindMaintainerExecutable();
+            if (File.Exists(maintainerExe))
             {
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = maintainerPath,
+                    FileName = maintainerExe,
+                    Arguments = $"--import-dir \"{OutputFolder}\"",
                     UseShellExecute = true
                 });
-                StatusMessage = "DCSS Maintainer launched. You can import the generated profile configs.";
+                StatusMessage = "Opened Maintainer to import generated profiles.";
             }
             else
             {
-                OpenOutputFolder();
-                StatusMessage = "Profile configs folder opened. Import into Maintainer.";
+                StatusMessage = $"Profiles ready at {OutputFolder}. Open DCSS.Maintainer to import.";
             }
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Failed to launch Maintainer: {ex.Message}";
+            StatusMessage = $"Import action note: {ex.Message}";
         }
     }
 
-    public event PropertyChangedEventHandler? PropertyChanged;
-    protected void OnPropertyChanged([CallerMemberName] string? name = null) =>
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-
-    protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? name = null)
+    private string FindMaintainerExecutable()
     {
-        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
-        field = value;
-        OnPropertyChanged(name);
+        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        var candidates = new[]
+        {
+            Path.Combine(baseDir, "DCSS.Maintainer.exe"),
+            Path.Combine(baseDir, "..", "DCSS.Maintainer", "DCSS.Maintainer.exe"),
+            @"D:\DC-ScreenSharing\tools\DCSS.Maintainer\bin\Debug\net8.0-windows\DCSS.Maintainer.exe"
+        };
+        return candidates.FirstOrDefault(File.Exists) ?? string.Empty;
+    }
+
+    private static VpnBookServer PickVpnBookServer(CollectorRegion region, int index, string mode)
+    {
+        if (region.Servers == null || region.Servers.Count == 0)
+        {
+            return new VpnBookServer { Id = $"{region.Code.ToLowerInvariant()}1", Name = $"{region.DisplayName} Server", CountryCode = region.Code, CountryName = region.DisplayName };
+        }
+
+        if (string.Equals(mode, "Server 1", StringComparison.OrdinalIgnoreCase))
+        {
+            return (VpnBookServer)region.Servers[0];
+        }
+
+        if (string.Equals(mode, "Server 2", StringComparison.OrdinalIgnoreCase) && region.Servers.Count > 1)
+        {
+            return (VpnBookServer)region.Servers[1];
+        }
+
+        var serverIndex = index % region.Servers.Count;
+        return (VpnBookServer)region.Servers[serverIndex];
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    protected bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(storage, value)) return false;
+        storage = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         return true;
+    }
+
+    protected void OnPropertyChanged(string propertyName)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }

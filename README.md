@@ -9,10 +9,9 @@ DC-ScreenSharing is a Windows desktop application that performs per-application 
 
 ## Installation & Updates
 
-* **Latest Version**: `v1.0.2`
-* **New Users**: Download and run `DC-ScreenSharing-Setup-1.0.2.exe` from the [Latest GitHub Release](https://github.com/FaelSemW/DC-ScreenSharing/releases/latest).
-* **Existing v1.0.1 Users**: Download and install `v1.0.2` manually once to upgrade the installation.
-* **Future Updates**: Starting from `v1.0.2`, subsequent releases are detected, verified, and installed automatically.
+* **Latest Version**: `v1.0.5`
+* **New Users**: Download and run `DC-ScreenSharing-Setup-1.0.5.exe` from the [Latest GitHub Release](https://github.com/FaelSemW/DC-ScreenSharing/releases/latest).
+* **Existing Users**: Updates are detected, verified, and installed automatically on launch.
 
 ## System Architecture
 
@@ -39,10 +38,10 @@ The solution consists of the following components:
 dotnet test
 
 # Build and package production installer
-powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Configuration Release -Version 1.0.2
+powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Configuration Release -Version 1.0.5
 ```
 
-The compiled installer is output to `dist/installer/DC-ScreenSharing-Setup-1.0.2.exe`.
+The compiled installer is output to `dist/installer/DC-ScreenSharing-Setup-1.0.5.exe`.
 
 ## ProfileService Development Setup
 

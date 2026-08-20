@@ -171,7 +171,7 @@ public class VpnBookAutomationService : IAsyncDisposable
                         {
                             Code = normCode,
                             DisplayName = normName,
-                            Servers = group.ToList()
+                            Servers = group.Cast<CollectorServer>().ToList()
                         });
                     }
 

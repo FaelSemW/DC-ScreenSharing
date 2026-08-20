@@ -432,11 +432,15 @@ public class MainViewModel : INotifyPropertyChanged
                 Endpoint = profile.Wireguard.Endpoint,
                 Port = profile.Wireguard.Port,
                 Address = profile.Wireguard.Address,
+                Addresses = new List<string>(profile.Wireguard.Addresses),
                 Dns = profile.Wireguard.Dns,
+                DnsServers = new List<string>(profile.Wireguard.DnsServers),
                 PrivateKey = profile.Wireguard.PrivateKey,
                 PeerPublicKey = profile.Wireguard.PeerPublicKey,
                 AllowedIps = profile.Wireguard.AllowedIps,
+                AllowedIpsList = new List<string>(profile.Wireguard.AllowedIpsList),
                 Mtu = profile.Wireguard.Mtu,
+                PersistentKeepalive = profile.Wireguard.PersistentKeepalive,
                 DiscordExecutablePath = _detectedDiscord.ExecutablePath
             };
 

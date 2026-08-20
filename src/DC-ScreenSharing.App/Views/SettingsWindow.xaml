@@ -50,7 +50,7 @@
                 <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12">
                     <StackPanel>
                         <TextBlock Text="About" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,4" />
-                        <TextBlock Text="DC-ScreenSharing v1.0.1" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Text="DC-ScreenSharing v1.0.5" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" />
                         <TextBlock Text="Legitimate Application-Specific Routing" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0" />
                     </StackPanel>
                 </Border>

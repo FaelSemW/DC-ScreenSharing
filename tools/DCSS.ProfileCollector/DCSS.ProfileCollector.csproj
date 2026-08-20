@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\DC-ScreenSharing.Shared\DC-ScreenSharing.Shared.csproj" />
     <ProjectReference Include="..\..\src\DC-ScreenSharing.Core\DC-ScreenSharing.Core.csproj" />
+    <ProjectReference Include="..\..\src\DC-ScreenSharing.Networking\DC-ScreenSharing.Networking.csproj" />
   </ItemGroup>
 
 </Project>

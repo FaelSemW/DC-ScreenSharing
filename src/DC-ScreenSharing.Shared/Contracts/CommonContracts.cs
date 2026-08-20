@@ -40,10 +40,42 @@ public class TunnelConfiguration
     public int Port { get; set; } = 51820;
 
     [JsonPropertyName("address")]
-    public string Address { get; set; } = "10.8.0.2/32";
+    public string Address
+    {
+        get => Addresses.Count > 0 ? string.Join(", ", Addresses) : _address;
+        set
+        {
+            _address = value ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(value) && (Addresses == null || Addresses.Count == 0))
+            {
+                Addresses = value.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries)
+                                 .Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+            }
+        }
+    }
+    private string _address = "10.8.0.2/32";
+
+    [JsonPropertyName("addresses")]
+    public List<string> Addresses { get; set; } = new();
 
     [JsonPropertyName("dns")]
-    public string Dns { get; set; } = "1.1.1.1, 8.8.8.8";
+    public string Dns
+    {
+        get => DnsServers.Count > 0 ? string.Join(", ", DnsServers) : _dns;
+        set
+        {
+            _dns = value ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(value) && (DnsServers == null || DnsServers.Count == 0))
+            {
+                DnsServers = value.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries)
+                                  .Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+            }
+        }
+    }
+    private string _dns = "1.1.1.1, 8.8.8.8";
+
+    [JsonPropertyName("dnsServers")]
+    public List<string> DnsServers { get; set; } = new();
 
     [JsonPropertyName("privateKey")]
     public string PrivateKey { get; set; } = string.Empty;
@@ -52,10 +84,29 @@ public class TunnelConfiguration
     public string PeerPublicKey { get; set; } = string.Empty;
 
     [JsonPropertyName("allowedIps")]
-    public string AllowedIps { get; set; } = "0.0.0.0/0, ::/0";
+    public string AllowedIps
+    {
+        get => AllowedIpsList.Count > 0 ? string.Join(", ", AllowedIpsList) : _allowedIps;
+        set
+        {
+            _allowedIps = value ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(value) && (AllowedIpsList == null || AllowedIpsList.Count == 0))
+            {
+                AllowedIpsList = value.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries)
+                                      .Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+            }
+        }
+    }
+    private string _allowedIps = "0.0.0.0/0, ::/0";
+
+    [JsonPropertyName("allowedIpsList")]
+    public List<string> AllowedIpsList { get; set; } = new();
 
     [JsonPropertyName("mtu")]
     public int Mtu { get; set; } = Constants.DefaultInterfaceMtu;
+
+    [JsonPropertyName("persistentKeepalive")]
+    public int PersistentKeepalive { get; set; } = 25;
 
     [JsonPropertyName("allowedApps")]
     public List<string> AllowedApps { get; set; } = new()
@@ -106,7 +157,7 @@ public class ServiceStatusResponse
     public DateTime? ConnectedSinceUtc { get; set; }
 
     [JsonPropertyName("serviceVersion")]
-    public string ServiceVersion { get; set; } = "1.0.1";
+    public string ServiceVersion { get; set; } = "1.0.5";
 
     [JsonPropertyName("lastError")]
     public string? LastError { get; set; }

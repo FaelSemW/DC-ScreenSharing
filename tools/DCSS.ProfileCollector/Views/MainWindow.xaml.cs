@@ -39,6 +39,16 @@ public partial class MainWindow : Window
         await _viewModel.StartBatchAsync();
     }
 
+    private async void OnGenerateTestProfileClick(object sender, RoutedEventArgs e)
+    {
+        await _viewModel.GenerateTestProfileAsync();
+    }
+
+    private async void OnContinueAfterAttentionClick(object sender, RoutedEventArgs e)
+    {
+        await _viewModel.ContinueAfterAttentionAsync();
+    }
+
     private async void OnGenerateAllRegionsClick(object sender, RoutedEventArgs e)
     {
         await _viewModel.StartMultiRegionBatchAsync();

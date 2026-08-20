@@ -328,8 +328,60 @@ public class ProcessRoutingEngine
             }
         }
 
-        var allowedIpsList = (config.AllowedIps ?? "0.0.0.0/0, ::/0")
-            .Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        // Address list for WireGuard endpoint
+        var addresses = new List<string>();
+        if (config.Addresses != null && config.Addresses.Count > 0)
+        {
+            addresses.AddRange(config.Addresses.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()));
+        }
+        else if (!string.IsNullOrWhiteSpace(config.Address))
+        {
+            addresses.AddRange(config.Address.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries).Select(a => a.Trim()));
+        }
+        if (addresses.Count == 0)
+        {
+            addresses.Add("10.8.0.2/32");
+        }
+
+        // Allowed IPs list for WireGuard peer
+        var allowedIpsList = new List<string>();
+        if (config.AllowedIpsList != null && config.AllowedIpsList.Count > 0)
+        {
+            allowedIpsList.AddRange(config.AllowedIpsList.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()));
+        }
+        else if (!string.IsNullOrWhiteSpace(config.AllowedIps))
+        {
+            allowedIpsList.AddRange(config.AllowedIps.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries).Select(a => a.Trim()));
+        }
+        if (allowedIpsList.Count == 0)
+        {
+            allowedIpsList.AddRange(new[] { "0.0.0.0/0", "::/0" });
+        }
+
+        // DNS servers list
+        var dnsList = new List<string>();
+        if (config.DnsServers != null && config.DnsServers.Count > 0)
+        {
+            dnsList.AddRange(config.DnsServers.Where(d => !string.IsNullOrWhiteSpace(d)).Select(d => d.Trim()));
+        }
+        else if (!string.IsNullOrWhiteSpace(config.Dns))
+        {
+            dnsList.AddRange(config.Dns.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries).Select(d => d.Trim()));
+        }
+        if (dnsList.Count == 0)
+        {
+            dnsList.Add("1.1.1.1");
+        }
+
+        var dnsServers = new List<object>();
+        for (int i = 0; i < dnsList.Count; i++)
+        {
+            var tag = i == 0 ? "dns-remote" : $"dns-remote-{i + 1}";
+            dnsServers.Add(new { tag = tag, type = "udp", server = dnsList[i], server_port = 53, detour = "wg-out" });
+        }
+        dnsServers.Add(new { tag = "dns-direct", type = "local", detour = "direct" });
+
+        var keepaliveInterval = config.PersistentKeepalive > 0 ? config.PersistentKeepalive : 25;
 
         var configObj = new
         {
@@ -340,11 +392,7 @@ public class ProcessRoutingEngine
             },
             dns = new
             {
-                servers = new object[]
-                {
-                    new { tag = "dns-remote", type = "udp", server = "1.1.1.1", server_port = 53, detour = "wg-out" },
-                    new { tag = "dns-direct", type = "local", detour = "direct" }
-                },
+                servers = dnsServers.ToArray(),
                 rules = new object[]
                 {
                     new { process_name = processList, server = "dns-remote" }
@@ -371,7 +419,7 @@ public class ProcessRoutingEngine
                 {
                     type = "wireguard",
                     tag = "wg-out",
-                    address = new[] { config.Address },
+                    address = addresses.ToArray(),
                     private_key = config.PrivateKey,
                     peers = new object[]
                     {
@@ -380,11 +428,11 @@ public class ProcessRoutingEngine
                             address = config.Endpoint,
                             port = config.Port,
                             public_key = config.PeerPublicKey,
-                            allowed_ips = allowedIpsList,
-                            persistent_keepalive_interval = 25
+                            allowed_ips = allowedIpsList.ToArray(),
+                            persistent_keepalive_interval = keepaliveInterval
                         }
                     },
-                    mtu = config.Mtu
+                    mtu = config.Mtu > 0 ? config.Mtu : 1420
                 }
             },
             outbounds = new object[]

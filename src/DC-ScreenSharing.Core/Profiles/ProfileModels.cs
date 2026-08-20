@@ -44,10 +44,40 @@ public class WireGuardProfileConfig
     public int Port { get; set; } = 51820;
 
     [JsonPropertyName("address")]
-    public string Address { get; set; } = "10.8.0.2/32";
+    public string Address
+    {
+        get => Addresses.Count > 0 ? string.Join(", ", Addresses) : _address;
+        set
+        {
+            _address = value ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(value) && Addresses.Count == 0)
+            {
+                Addresses = WireGuardConfParser.ParseCidrList(value);
+            }
+        }
+    }
+    private string _address = "10.8.0.2/32";
+
+    [JsonPropertyName("addresses")]
+    public List<string> Addresses { get; set; } = new();
 
     [JsonPropertyName("dns")]
-    public string Dns { get; set; } = "1.1.1.1, 8.8.8.8";
+    public string Dns
+    {
+        get => DnsServers.Count > 0 ? string.Join(", ", DnsServers) : _dns;
+        set
+        {
+            _dns = value ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(value) && DnsServers.Count == 0)
+            {
+                DnsServers = WireGuardConfParser.ParseDnsList(value);
+            }
+        }
+    }
+    private string _dns = "1.1.1.1, 8.8.8.8";
+
+    [JsonPropertyName("dnsServers")]
+    public List<string> DnsServers { get; set; } = new();
 
     [JsonPropertyName("privateKey")]
     public string PrivateKey { get; set; } = string.Empty;
@@ -56,10 +86,28 @@ public class WireGuardProfileConfig
     public string PeerPublicKey { get; set; } = string.Empty;
 
     [JsonPropertyName("allowedIps")]
-    public string AllowedIps { get; set; } = "0.0.0.0/0, ::/0";
+    public string AllowedIps
+    {
+        get => AllowedIpsList.Count > 0 ? string.Join(", ", AllowedIpsList) : _allowedIps;
+        set
+        {
+            _allowedIps = value ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(value) && AllowedIpsList.Count == 0)
+            {
+                AllowedIpsList = WireGuardConfParser.ParseCidrList(value);
+            }
+        }
+    }
+    private string _allowedIps = "0.0.0.0/0, ::/0";
+
+    [JsonPropertyName("allowedIpsList")]
+    public List<string> AllowedIpsList { get; set; } = new();
 
     [JsonPropertyName("mtu")]
     public int Mtu { get; set; } = 1420;
+
+    [JsonPropertyName("persistentKeepalive")]
+    public int PersistentKeepalive { get; set; } = 25;
 }
 
 public class ServerProfile

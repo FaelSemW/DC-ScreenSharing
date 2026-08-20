@@ -2,7 +2,13 @@ using System.Text.Json.Serialization;
 
 namespace DCSS.ProfileCollector.Models;
 
-public class VpnBookServer
+public static class ProviderConstants
+{
+    public const string ProtonVpn = "Proton VPN";
+    public const string VpnBook = "VPNBook";
+}
+
+public class CollectorServer
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
@@ -19,40 +25,79 @@ public class VpnBookServer
     [JsonPropertyName("countryName")]
     public string CountryName { get; set; } = string.Empty;
 
-    public override string ToString() => $"{Name} ({Hostname})";
+    public override string ToString() => !string.IsNullOrEmpty(Hostname) ? $"{Name} ({Hostname})" : Name;
 }
 
-public class VpnBookRegion
+public class CollectorRegion
 {
     public string Code { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
-    public List<VpnBookServer> Servers { get; set; } = new();
+    public List<CollectorServer> Servers { get; set; } = new();
 
     public override string ToString() => $"{DisplayName} ({Code})";
 }
 
+// Legacy aliases for backward compatibility with existing code
+public class VpnBookServer : CollectorServer { }
+public class VpnBookRegion : CollectorRegion { }
+
 public class PortOption
 {
-    public string Port { get; set; } = "443";
-    public string Description { get; set; } = "443 (HTTPS) - Best for bypassing firewalls";
+    public string Port { get; set; } = "51820";
+    public string Description { get; set; } = "51820 (WireGuard Default)";
 
     public override string ToString() => Description;
+}
+
+public class ProtonOptions
+{
+    public string Platform { get; set; } = "Windows";
+    public string NetShield { get; set; } = "Block malware only";
+    public bool ModerateNat { get; set; } = false;
+    public bool NatPmp { get; set; } = false;
+    public bool VpnAccelerator { get; set; } = true;
+}
+
+public class ProfileGenerationOptions
+{
+    public string Provider { get; set; } = ProviderConstants.ProtonVpn;
+    public CollectorRegion Region { get; set; } = new();
+    public string ServerMode { get; set; } = "Automatic";
+    public string? SpecificServerId { get; set; }
+    public string Port { get; set; } = "51820";
+    public string ConfigurationName { get; set; } = "DCSS-US-001";
+    public ProtonOptions ProtonSettings { get; set; } = new();
+}
+
+public class ProviderProfileResult
+{
+    public bool Success { get; set; }
+    public string ConfigContent { get; set; } = string.Empty;
+    public string ServerName { get; set; } = string.Empty;
+    public DateTime? ExpiresAtUtc { get; set; }
+    public string ErrorMessage { get; set; } = string.Empty;
+    public bool RequiresOperatorAttention { get; set; }
+    public string OperatorAttentionReason { get; set; } = string.Empty;
 }
 
 public class ProfileResultItem
 {
     public string Filename { get; set; } = string.Empty;
+    public string Provider { get; set; } = ProviderConstants.ProtonVpn;
     public string Region { get; set; } = string.Empty;
     public string ServerName { get; set; } = string.Empty;
     public string Status { get; set; } = "Ready";
     public DateTime? ExpiresAtUtc { get; set; }
-    public string ExpirationDisplay => ExpiresAtUtc.HasValue ? $"Expires: {ExpiresAtUtc.Value:yyyy-MM-dd}" : "Expires: 7 days";
+    public string ExpirationDisplay => ExpiresAtUtc.HasValue ? $"Expires: {ExpiresAtUtc.Value:yyyy-MM-dd}" : "Expires: None (Proton Standard)";
     public string StatusDetail { get; set; } = string.Empty;
     public string? DerivedPublicKeyHash { get; set; }
 }
 
 public class InventoryItem
 {
+    [JsonPropertyName("provider")]
+    public string Provider { get; set; } = ProviderConstants.ProtonVpn;
+
     [JsonPropertyName("filename")]
     public string Filename { get; set; } = string.Empty;
 
