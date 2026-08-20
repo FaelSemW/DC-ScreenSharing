@@ -101,6 +101,55 @@ public class TunnelHealthMonitorTests
         var firstPeer = peers[0];
         Assert.True(firstPeer.TryGetProperty("persistent_keepalive_interval", out var keepaliveProp));
         Assert.Equal(25, keepaliveProp.GetInt32());
+
+        // Verify routing rules: direct domain bypass, discord process routing, final direct
+        var route = root.GetProperty("route");
+        Assert.Equal("direct", route.GetProperty("final").GetString());
+        Assert.True(route.GetProperty("auto_detect_interface").GetBoolean());
+
+        var inbounds = root.GetProperty("inbounds");
+        var tunIn = inbounds[0];
+        Assert.False(tunIn.GetProperty("strict_route").GetBoolean());
+    }
+
+    [Fact]
+    public void ProcessRoutingEngine_RoutesDiscordToWireGuard_AndOthersDirect()
+    {
+        var logger = new TestLogger();
+        var engine = new ProcessRoutingEngine(logger);
+
+        var config = new TunnelConfiguration
+        {
+            ServerId = "us-east-1",
+            ServerName = "US East",
+            Endpoint = "198.51.100.1",
+            Port = 51820,
+            Address = "10.8.0.2/32",
+            PrivateKey = "aGVsbG93b3JsZHByaXZhdGVrZXkxMjM0NTY3ODkwMTI=",
+            PeerPublicKey = "c2VydmVycHVibGlja2V5MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=",
+            Mtu = 1420,
+            DiscordExecutablePath = @"C:\Users\TestUser\AppData\Local\Discord\app-1.0.9254\Discord.exe"
+        };
+
+        var json = engine.GenerateEngineConfig(config);
+        using var doc = JsonDocument.Parse(json);
+        var route = doc.RootElement.GetProperty("route");
+        var rules = route.GetProperty("rules");
+
+        // Verify Discord process rule routes to wg-out
+        var foundDiscordRule = false;
+        foreach (var rule in rules.EnumerateArray())
+        {
+            if (rule.TryGetProperty("process_name", out var pNameList) && rule.TryGetProperty("outbound", out var outBound))
+            {
+                if (outBound.GetString() == "wg-out")
+                {
+                    foundDiscordRule = true;
+                    Assert.Contains("Discord.exe", pNameList.EnumerateArray().Select(x => x.GetString()));
+                }
+            }
+        }
+        Assert.True(foundDiscordRule, "Discord process routing rule to wg-out must exist in config.");
     }
 
     [Fact]

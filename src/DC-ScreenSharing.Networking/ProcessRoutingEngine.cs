@@ -272,6 +272,16 @@ public class ProcessRoutingEngine
             }
         }
 
+        // Include all standard Discord flavor process names
+        var standardDiscordExes = new[] { "Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe", "DiscordDevelopment.exe" };
+        foreach (var name in standardDiscordExes)
+        {
+            if (!processList.Contains(name, StringComparer.OrdinalIgnoreCase))
+            {
+                processList.Add(name);
+            }
+        }
+
         var allowedIpsList = (config.AllowedIps ?? "0.0.0.0/0, ::/0")
             .Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries);
 
@@ -292,7 +302,9 @@ public class ProcessRoutingEngine
                 rules = new object[]
                 {
                     new { process_name = processList, server = "dns-remote" }
-                }
+                },
+                final = "dns-direct",
+                strategy = "prefer_ipv4"
             },
             inbounds = new object[]
             {
@@ -301,7 +313,7 @@ public class ProcessRoutingEngine
                     type = "tun",
                     tag = "tun-in",
                     interface_name = Constants.DefaultInterfaceName,
-                    address = new[] { "172.19.0.1/30" },
+                    address = new[] { "172.19.0.1/30", "fdfe:dc::1/126" },
                     auto_route = true,
                     strict_route = false,
                     stack = "system"
@@ -335,6 +347,11 @@ public class ProcessRoutingEngine
                 {
                     type = "direct",
                     tag = "direct"
+                },
+                new
+                {
+                    type = "dns",
+                    tag = "dns-out"
                 }
             },
             route = new
@@ -343,6 +360,16 @@ public class ProcessRoutingEngine
                 default_domain_resolver = "dns-direct",
                 rules = new object[]
                 {
+                    new
+                    {
+                        protocol = "dns",
+                        outbound = "dns-out"
+                    },
+                    new
+                    {
+                        domain_suffix = new[] { "zaprecovery.online", "github.com", "githubusercontent.com" },
+                        outbound = "direct"
+                    },
                     new
                     {
                         process_name = processList,
