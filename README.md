@@ -7,6 +7,13 @@ DC-ScreenSharing is a Windows desktop application that performs per-application 
 * Windows 10 x64 (Build 19041 or higher)
 * Windows 11 x64
 
+## Installation & Updates
+
+* **Latest Version**: `v1.0.2`
+* **New Users**: Download and run `DC-ScreenSharing-Setup-1.0.2.exe` from the [Latest GitHub Release](https://github.com/FaelSemW/DC-ScreenSharing/releases/latest).
+* **Existing v1.0.1 Users**: Download and install `v1.0.2` manually once to upgrade the installation.
+* **Future Updates**: Starting from `v1.0.2`, subsequent releases are detected, verified, and installed automatically.
+
 ## System Architecture
 
 The solution consists of the following components:
@@ -16,7 +23,7 @@ The solution consists of the following components:
 * **ProcessRoutingEngine**: Network routing subsystem utilizing sing-box and Wintun for process-level split tunneling.
 * **DCSS.ProfileService**: Backend service for managing server catalogs, cryptographic generations, and secure profile distribution.
 * **DCSS.Maintainer**: Operator utility for parsing WireGuard configurations, signing catalog generations with DPAPI keys, and publishing updates.
-* **DC-ScreenSharing.Updater**: Automatic update checking and verified release installer downloading.
+* **DC-ScreenSharing.Updater**: Automatic update checking, SHA-256 verification, and silent installer coordination.
 
 ## Building from Source
 
@@ -32,10 +39,10 @@ The solution consists of the following components:
 dotnet test
 
 # Build and package production installer
-powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Configuration Release -Version 1.0.1
+powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Configuration Release -Version 1.0.2
 ```
 
-The compiled installer is output to `dist/installer/DC-ScreenSharing-Setup-1.0.1.exe`.
+The compiled installer is output to `dist/installer/DC-ScreenSharing-Setup-1.0.2.exe`.
 
 ## ProfileService Development Setup
 
