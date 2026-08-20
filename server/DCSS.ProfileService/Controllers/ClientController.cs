@@ -41,6 +41,8 @@ public class ClientController : ControllerBase
         return combined.Contains("openvpn-v1") ||
                combined.Contains("openvpn") ||
                combined.Contains("ovpn") ||
+               combined.Contains("v1.0.8") ||
+               combined.Contains("1.0.8") ||
                combined.Contains("v1.0.7") ||
                combined.Contains("1.0.7");
     }

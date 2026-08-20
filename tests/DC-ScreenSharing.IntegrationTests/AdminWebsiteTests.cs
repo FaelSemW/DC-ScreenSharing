@@ -19,6 +19,7 @@ public class AdminWebsiteTests : IClassFixture<WebApplicationFactory<global::Pro
     public AdminWebsiteTests(WebApplicationFactory<global::Program> factory)
     {
         _testStorageDir = Path.Combine(Path.GetTempPath(), "DCSS_AdminTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_testStorageDir);
         Environment.SetEnvironmentVariable("ProfileService__StoragePath", _testStorageDir);
         Environment.SetEnvironmentVariable("ADMIN_API_KEY", TestAdminApiKey);
 

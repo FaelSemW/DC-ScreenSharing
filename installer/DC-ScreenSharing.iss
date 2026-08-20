@@ -1,5 +1,5 @@
 #define MyAppName "DC-ScreenSharing"
-#define MyAppVersion "1.0.7"
+#define MyAppVersion "1.0.8"
 #define MyAppPublisher "DC-ScreenSharing Team"
 #define MyAppURL "https://github.com/FaelSemW/DC-ScreenSharing"
 #define MyAppExeName "DC-ScreenSharing.exe"
