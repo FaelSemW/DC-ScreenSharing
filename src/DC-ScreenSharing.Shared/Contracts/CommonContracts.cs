@@ -33,6 +33,12 @@ public class TunnelConfiguration
     [JsonPropertyName("serverName")]
     public string ServerName { get; set; } = string.Empty;
 
+    [JsonPropertyName("protocol")]
+    public string Protocol { get; set; } = "WIREGUARD";
+
+    [JsonPropertyName("openvpnProfileJson")]
+    public string? OpenVpnProfileJson { get; set; }
+
     [JsonPropertyName("endpoint")]
     public string Endpoint { get; set; } = string.Empty;
 

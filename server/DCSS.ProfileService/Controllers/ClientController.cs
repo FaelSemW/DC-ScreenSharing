@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using DCScreenSharing.Core.Profiles;
 using DCSS.ProfileService.Services;
 
 namespace DCSS.ProfileService.Controllers;
@@ -28,6 +29,15 @@ public class ClientController : ControllerBase
     {
         _store = store;
         _enrollmentService = enrollmentService;
+    }
+
+    private bool ClientSupportsOpenVpn()
+    {
+        var headerCaps = Request.Headers["X-Client-Capabilities"].ToString();
+        var queryCaps = Request.Query["capabilities"].ToString();
+        var combined = $"{headerCaps},{queryCaps}".ToLowerInvariant();
+
+        return combined.Contains("openvpn-v1") || combined.Contains("openvpn");
     }
 
     [HttpGet("health")]
@@ -98,6 +108,20 @@ public class ClientController : ControllerBase
         if (catalog == null)
             return NotFound(new { error = "No active server catalog available." });
 
+        var supportsOvpn = ClientSupportsOpenVpn();
+        if (!supportsOvpn)
+        {
+            // Backward compatibility for legacy clients (e.g. v1.0.6): filter to WireGuard only
+            var filtered = new ServerCatalog
+            {
+                Schema = catalog.Schema,
+                Generation = catalog.Generation,
+                PublishedAtUtc = catalog.PublishedAtUtc,
+                Servers = catalog.Servers.Where(s => VpnProtocol.IsWireGuard(s.Protocol)).ToList()
+            };
+            return Ok(filtered);
+        }
+
         return Ok(catalog);
     }
 
@@ -108,7 +132,11 @@ public class ClientController : ControllerBase
         if (catalog == null)
             return NotFound(new { error = "No servers available." });
 
-        var enabled = catalog.Servers.Where(s => s.Enabled).ToList();
+        var supportsOvpn = ClientSupportsOpenVpn();
+        var enabled = catalog.Servers
+            .Where(s => s.Enabled && (supportsOvpn || VpnProtocol.IsWireGuard(s.Protocol)))
+            .ToList();
+
         return Ok(new
         {
             generation = catalog.Generation,

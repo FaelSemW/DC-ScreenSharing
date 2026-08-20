@@ -44,7 +44,10 @@ public class AddServerRequest
 {
     public string DisplayName { get; set; } = string.Empty;
     public string Country { get; set; } = "US";
+    public string CountryCode { get; set; } = "US";
     public string Region { get; set; } = string.Empty;
+    public string? City { get; set; }
+    public string Provider { get; set; } = "Custom";
     public string ConfContent { get; set; } = string.Empty;
 }
 
@@ -55,6 +58,59 @@ public class UpdateServerRequest
     public bool Enabled { get; set; } = true;
 }
 
+public class ValidateOpenVpnRequest
+{
+    public string OvpnContent { get; set; } = string.Empty;
+    public string Provider { get; set; } = "Custom";
+    public Dictionary<string, string>? SupportingFiles { get; set; }
+}
+
+public class AddOpenVpnServerRequest
+{
+    public string DisplayName { get; set; } = string.Empty;
+    public string Country { get; set; } = string.Empty;
+    public string CountryCode { get; set; } = string.Empty;
+    public string Region { get; set; } = string.Empty;
+    public string? City { get; set; }
+    public string Provider { get; set; } = "Custom";
+    public string OvpnContent { get; set; } = string.Empty;
+    public string? CredentialSetId { get; set; }
+    public string? Username { get; set; }
+    public string? Password { get; set; }
+    public Dictionary<string, string>? SupportingFiles { get; set; }
+}
+
+public class BulkImportOpenVpnRequest
+{
+    public List<AddOpenVpnServerRequest> Servers { get; set; } = new();
+}
+
+public class UpdateOpenVpnServerRequest
+{
+    public string DisplayName { get; set; } = string.Empty;
+    public string Region { get; set; } = string.Empty;
+    public string? City { get; set; }
+    public string Provider { get; set; } = "Custom";
+    public string? CredentialSetId { get; set; }
+    public bool Enabled { get; set; } = true;
+}
+
+public class CreateCredentialSetRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string Provider { get; set; } = "Custom";
+    public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+}
+
+public class UpdateCredentialSetRequest
+{
+    public string? Name { get; set; }
+    public string? Provider { get; set; }
+    public string? Username { get; set; }
+    public string? Password { get; set; }
+}
+
 [ApiController]
 [Route("api/v1/admin")]
 public class AdminController : ControllerBase
@@ -62,6 +118,7 @@ public class AdminController : ControllerBase
     private readonly ProfileStoreService _store;
     private readonly ClientEnrollmentService _enrollmentService;
     private readonly AccessKeyService _accessKeyService;
+    private readonly CredentialSetService _credentialSetService;
     private readonly AuditLogService _auditLog;
     private readonly IConfiguration _config;
     private static readonly ConcurrentDictionary<string, List<DateTime>> _failedLoginRateLimiter = new();
@@ -70,12 +127,14 @@ public class AdminController : ControllerBase
         ProfileStoreService store,
         ClientEnrollmentService enrollmentService,
         AccessKeyService accessKeyService,
+        CredentialSetService credentialSetService,
         AuditLogService auditLog,
         IConfiguration config)
     {
         _store = store;
         _enrollmentService = enrollmentService;
         _accessKeyService = accessKeyService;
+        _credentialSetService = credentialSetService;
         _auditLog = auditLog;
         _config = config;
     }
@@ -201,6 +260,8 @@ public class AdminController : ControllerBase
             activeKeysCount = allKeys.Count(k => k.Status == AccessKeyStatus.Active),
             groupKeysCount = allKeys.Count(k => k.Type == AccessKeyType.Group),
             availableServersCount = allServers.Count(s => s.Enabled),
+            wireGuardServersCount = allServers.Count(s => s.Enabled && VpnProtocol.IsWireGuard(s.Protocol)),
+            openVpnServersCount = allServers.Count(s => s.Enabled && VpnProtocol.IsOpenVpn(s.Protocol)),
             currentGeneration = activeGen,
             backendHealth = "Healthy",
             recentActivations = allClients.Take(5).Select(c => new
@@ -256,41 +317,37 @@ public class AdminController : ControllerBase
             case "1y":
                 expiresAt = now.AddYears(1);
                 break;
-            case "never":
-                expiresAt = null;
-                break;
             case "custom":
                 expiresAt = request.CustomExpiresAtUtc;
                 break;
-            default:
-                expiresAt = now.AddDays(30);
+            case "never":
+                expiresAt = null;
                 break;
         }
 
-        var isSingleUse = string.Equals(request.Type, AccessKeyType.SingleUse, StringComparison.OrdinalIgnoreCase);
-        int? maxUses = isSingleUse ? 1 : (request.MaxUses is > 0 ? request.MaxUses : null);
+        var isGroup = string.Equals(request.Type, AccessKeyType.Group, StringComparison.OrdinalIgnoreCase);
+        int? maxUses = isGroup ? request.MaxUses : 1;
 
-        var (plaintext, record) = _accessKeyService.CreateAccessKey(
-            request.Name,
-            request.Type,
-            expiresAt,
-            maxUses,
+        var (plaintextCode, record) = _accessKeyService.CreateAccessKey(
+            name: request.Name,
+            type: request.Type,
+            expiresAtUtc: expiresAt,
+            maxUses: maxUses,
             createdBy: "Admin");
 
-        _auditLog.Record("AccessKeyCreated", "admin", GetClientIp(), targetId: record.Id, metadata: new()
+        _auditLog.Record("AccessKeyCreated", "admin", GetClientIp(), targetId: record.Id, metadata: new Dictionary<string, string>
         {
             ["name"] = record.Name,
-            ["type"] = record.Type,
-            ["maxUses"] = record.MaxUses?.ToString() ?? "Unlimited",
-            ["expiresAt"] = record.ExpiresAtUtc?.ToString("O") ?? "Never"
+            ["type"] = record.Type
         });
 
         return Ok(new
         {
             success = true,
-            accessKey = plaintext,
             record = record,
-            message = "Access key created successfully. Store the code securely; it cannot be viewed again."
+            key = record,
+            accessKey = plaintextCode,
+            plaintextCode = plaintextCode
         });
     }
 
@@ -298,7 +355,7 @@ public class AdminController : ControllerBase
     public IActionResult DisableAccessKey(string id)
     {
         var success = _accessKeyService.DisableKey(id);
-        if (!success) return NotFound(new { error = "Access key not found." });
+        if (!success) return NotFound(new { error = "Key not found." });
 
         _auditLog.Record("AccessKeyDisabled", "admin", GetClientIp(), targetId: id);
         return Ok(new { success = true, message = "Access key disabled." });
@@ -308,7 +365,7 @@ public class AdminController : ControllerBase
     public IActionResult EnableAccessKey(string id)
     {
         var success = _accessKeyService.EnableKey(id);
-        if (!success) return NotFound(new { error = "Access key not found." });
+        if (!success) return NotFound(new { error = "Key not found." });
 
         _auditLog.Record("AccessKeyEnabled", "admin", GetClientIp(), targetId: id);
         return Ok(new { success = true, message = "Access key enabled." });
@@ -318,34 +375,36 @@ public class AdminController : ControllerBase
     public IActionResult RevokeAccessKey(string id, [FromBody] RevokeKeyRequest? request)
     {
         var key = _accessKeyService.GetKeyById(id);
-        if (key == null) return NotFound(new { error = "Access key not found." });
+        if (key == null) return NotFound(new { error = "Key not found." });
 
-        _accessKeyService.RevokeKey(id);
-        int revokedClients = 0;
+        var success = _accessKeyService.RevokeKey(id);
+        if (!success) return NotFound(new { error = "Key not found." });
 
+        int revokedClientsCount = 0;
         if (request?.RevokeClients == true)
         {
-            revokedClients = _enrollmentService.RevokeClientsByAccessKey(id, key.CodeHash);
+            revokedClientsCount = _enrollmentService.RevokeClientsByAccessKey(id, key.CodeHash);
         }
 
         _auditLog.Record("AccessKeyRevoked", "admin", GetClientIp(), targetId: id, metadata: new()
         {
-            ["revokedClientsCount"] = revokedClients.ToString()
+            ["name"] = key.Name,
+            ["revokedClientsCount"] = revokedClientsCount.ToString()
         });
 
         return Ok(new
         {
             success = true,
-            message = $"Access key revoked. {revokedClients} associated client(s) revoked.",
-            revokedClientsCount = revokedClients
+            message = $"Access key revoked. {revokedClientsCount} associated client(s) revoked.",
+            revokedClientsCount
         });
     }
 
     [HttpGet("access-keys/{id}/usage")]
-    public IActionResult GetAccessKeyUsage(string id)
+    public IActionResult GetKeyUsage(string id)
     {
         var key = _accessKeyService.GetKeyById(id);
-        if (key == null) return NotFound(new { error = "Access key not found." });
+        if (key == null) return NotFound(new { error = "Key not found." });
 
         var clients = _enrollmentService.GetClientsByAccessKey(id, key.CodeHash);
         return Ok(new
@@ -353,6 +412,43 @@ public class AdminController : ControllerBase
             key,
             clients
         });
+    }
+
+    // ----------------------------------------------------
+    // ENROLLMENT TICKETS (LEGACY)
+    // ----------------------------------------------------
+
+    [HttpPost("tickets")]
+    public IActionResult CreateTicket([FromBody] CreateTicketRequest? request)
+    {
+        var validity = request?.ValidityMinutes > 0 ? request.ValidityMinutes : 30;
+        var (ticket, record) = _enrollmentService.CreateEnrollmentTicket(validity, request?.Description ?? "Client Enrollment");
+
+        _auditLog.Record("TicketCreated", "admin", GetClientIp(), targetId: record.TicketHash);
+
+        return Ok(new
+        {
+            ticket = ticket,
+            ticketHash = record.TicketHash,
+            expiresAtUtc = record.ExpiresAtUtc,
+            description = record.Description
+        });
+    }
+
+    [HttpPost("tickets/{ticketHash}/revoke")]
+    public IActionResult RevokeTicket(string ticketHash)
+    {
+        var success = _enrollmentService.RevokeTicket(ticketHash);
+        if (!success) return NotFound(new { error = "Ticket not found." });
+
+        _auditLog.Record("TicketRevoked", "admin", GetClientIp(), targetId: ticketHash);
+        return Ok(new { success = true, message = "Ticket revoked." });
+    }
+
+    [HttpGet("tickets")]
+    public IActionResult GetTickets()
+    {
+        return Ok(_enrollmentService.GetTickets());
     }
 
     // ----------------------------------------------------
@@ -395,18 +491,18 @@ public class AdminController : ControllerBase
     }
 
     // ----------------------------------------------------
-    // SERVER MANAGEMENT
+    // SERVER MANAGEMENT (WIREGUARD + OPENVPN)
     // ----------------------------------------------------
 
     [HttpGet("servers")]
-    public IActionResult GetServers()
+    public IActionResult GetServers([FromQuery] string? protocol = null)
     {
-        var servers = _store.GetServers();
+        var servers = _store.GetServers(protocol);
         return Ok(servers);
     }
 
     [HttpPost("servers")]
-    public IActionResult AddServer([FromBody] AddServerRequest request)
+    public IActionResult AddWireGuardServer([FromBody] AddServerRequest request)
     {
         if (request == null || string.IsNullOrWhiteSpace(request.ConfContent))
             return BadRequest(new { error = "WireGuard configuration content (.conf) is required." });
@@ -415,17 +511,28 @@ public class AdminController : ControllerBase
             request.ConfContent,
             request.DisplayName,
             request.Country,
-            request.Region);
+            request.Region,
+            request.Provider);
 
         if (!success || entry == null || profile == null)
         {
             return BadRequest(new { error = $"Invalid WireGuard profile: {error}" });
         }
 
-        _store.AddServer(entry, profile, request.Country);
+        if (!string.IsNullOrEmpty(request.CountryCode))
+        {
+            entry.CountryCode = request.CountryCode.Trim();
+        }
+        if (!string.IsNullOrEmpty(request.City))
+        {
+            entry.City = request.City.Trim();
+        }
+
+        _store.AddWireGuardServer(entry, profile, request.Country, request.Provider);
         _auditLog.Record("ServerAdded", "admin", GetClientIp(), targetId: entry.Id, metadata: new()
         {
             ["name"] = entry.Name,
+            ["protocol"] = "WIREGUARD",
             ["country"] = request.Country,
             ["endpoint"] = profile.Wireguard.Endpoint
         });
@@ -434,7 +541,140 @@ public class AdminController : ControllerBase
         {
             success = true,
             server = entry,
-            message = $"Server '{entry.Name}' added to registry. Remember to create and publish a new generation to apply changes to clients."
+            message = $"WireGuard server '{entry.Name}' added to registry. Remember to create and publish a new generation to apply changes to clients."
+        });
+    }
+
+    [HttpPost("openvpn/validate")]
+    public IActionResult ValidateOpenVpn([FromBody] ValidateOpenVpnRequest request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.OvpnContent))
+        {
+            return BadRequest(new { error = "OpenVPN configuration content (.ovpn) is required." });
+        }
+
+        var validation = OpenVpnConfigParser.ParseAndValidate(
+            request.OvpnContent,
+            request.SupportingFiles,
+            request.Provider);
+
+        return Ok(new
+        {
+            isValid = validation.IsValid,
+            error = validation.Error,
+            protocol = validation.Protocol,
+            primaryRemote = validation.PrimaryRemote,
+            additionalRemotesCount = validation.AdditionalRemotesCount,
+            remotes = validation.Remotes,
+            authType = validation.AuthType,
+            hasIPv6 = validation.HasIPv6,
+            provider = validation.Provider,
+            unsafeDirectives = validation.UnsafeDirectives,
+            missingExternalFiles = validation.MissingExternalFiles
+        });
+    }
+
+    [HttpPost("servers/openvpn")]
+    public IActionResult AddOpenVpnServer([FromBody] AddOpenVpnServerRequest request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.OvpnContent))
+            return BadRequest(new { error = "OpenVPN configuration content (.ovpn) is required." });
+
+        var (success, error, entry, profile) = ProfileStoreService.ParseOpenVpnConfig(
+            request.OvpnContent,
+            request.DisplayName,
+            request.Country,
+            request.CountryCode,
+            request.Region,
+            request.City,
+            request.Provider,
+            request.CredentialSetId,
+            request.Username,
+            request.Password,
+            request.SupportingFiles);
+
+        if (!success || entry == null || profile == null)
+        {
+            _auditLog.Record("OpenVpnProfileRejected", "admin", GetClientIp(), metadata: new()
+            {
+                ["reason"] = error,
+                ["country"] = request.Country
+            });
+            return BadRequest(new { error = $"Invalid OpenVPN profile: {error}" });
+        }
+
+        _store.AddOpenVpnServer(entry, profile, request.Country, request.CountryCode, request.City, request.Provider, request.CredentialSetId);
+
+        _auditLog.Record("OpenVpnServerImported", "admin", GetClientIp(), targetId: entry.Id, metadata: new()
+        {
+            ["name"] = entry.Name,
+            ["protocol"] = "OPENVPN",
+            ["provider"] = entry.Provider,
+            ["country"] = entry.Country,
+            ["primaryRemote"] = profile.Openvpn?.RemoteEndpoints.FirstOrDefault()?.Host ?? "N/A"
+        });
+
+        return Ok(new
+        {
+            success = true,
+            server = entry,
+            message = $"OpenVPN server '{entry.Name}' added to registry. Remember to create and publish a new generation to apply changes to clients."
+        });
+    }
+
+    [HttpPost("servers/openvpn/bulk")]
+    public IActionResult BulkImportOpenVpn([FromBody] BulkImportOpenVpnRequest request)
+    {
+        if (request?.Servers == null || request.Servers.Count == 0)
+        {
+            return BadRequest(new { error = "No OpenVPN profiles provided for bulk import." });
+        }
+
+        var imported = new List<ServerEntry>();
+        var errors = new List<string>();
+
+        foreach (var s in request.Servers)
+        {
+            if (string.IsNullOrWhiteSpace(s.OvpnContent)) continue;
+
+            var (success, error, entry, profile) = ProfileStoreService.ParseOpenVpnConfig(
+                s.OvpnContent,
+                s.DisplayName,
+                s.Country,
+                s.CountryCode,
+                s.Region,
+                s.City,
+                s.Provider,
+                s.CredentialSetId,
+                s.Username,
+                s.Password,
+                s.SupportingFiles);
+
+            if (success && entry != null && profile != null)
+            {
+                _store.AddOpenVpnServer(entry, profile, s.Country, s.CountryCode, s.City, s.Provider, s.CredentialSetId);
+                imported.Add(entry);
+
+                _auditLog.Record("OpenVpnServerImported", "admin", GetClientIp(), targetId: entry.Id, metadata: new()
+                {
+                    ["name"] = entry.Name,
+                    ["provider"] = entry.Provider,
+                    ["batch"] = "BulkImport"
+                });
+            }
+            else
+            {
+                errors.Add($"{s.DisplayName ?? s.Country}: {error}");
+            }
+        }
+
+        return Ok(new
+        {
+            success = true,
+            importedCount = imported.Count,
+            imported,
+            errors,
+            message = $"Successfully imported {imported.Count} OpenVPN server(s)."
         });
     }
 
@@ -456,6 +696,32 @@ public class AdminController : ControllerBase
         return Ok(new { success = true, message = "Server updated." });
     }
 
+    [HttpPut("servers/openvpn/{serverId}")]
+    public IActionResult UpdateOpenVpnServer(string serverId, [FromBody] UpdateOpenVpnServerRequest request)
+    {
+        if (request == null) return BadRequest(new { error = "Invalid request." });
+
+        var success = _store.UpdateOpenVpnServer(
+            serverId,
+            request.DisplayName,
+            request.Region,
+            request.City,
+            request.Provider,
+            request.CredentialSetId,
+            request.Enabled);
+
+        if (!success) return NotFound(new { error = "OpenVPN server not found." });
+
+        _auditLog.Record("OpenVpnServerUpdated", "admin", GetClientIp(), targetId: serverId, metadata: new()
+        {
+            ["name"] = request.DisplayName,
+            ["provider"] = request.Provider,
+            ["credentialSetId"] = request.CredentialSetId ?? "none"
+        });
+
+        return Ok(new { success = true, message = "OpenVPN server updated." });
+    }
+
     [HttpPost("servers/{serverId}/enable")]
     public IActionResult EnableServer(string serverId)
     {
@@ -472,7 +738,7 @@ public class AdminController : ControllerBase
         var success = _store.SetServerEnabled(serverId, false);
         if (!success) return NotFound(new { error = "Server not found." });
 
-        _auditLog.Record("ServerDisabled", "admin", GetClientIp(), targetId: serverId);
+        _auditLog.Record("OpenVpnServerDisabled", "admin", GetClientIp(), targetId: serverId);
         return Ok(new { success = true, message = "Server disabled." });
     }
 
@@ -484,6 +750,79 @@ public class AdminController : ControllerBase
 
         _auditLog.Record("ServerRemoved", "admin", GetClientIp(), targetId: serverId);
         return Ok(new { success = true, message = "Server removed from registry." });
+    }
+
+    // ----------------------------------------------------
+    // OPENVPN CREDENTIAL SETS
+    // ----------------------------------------------------
+
+    [HttpGet("openvpn/credential-sets")]
+    public IActionResult GetCredentialSets()
+    {
+        var sets = _credentialSetService.GetAllDtos();
+        return Ok(sets);
+    }
+
+    [HttpPost("openvpn/credential-sets")]
+    public IActionResult CreateCredentialSet([FromBody] CreateCredentialSetRequest request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.Name))
+        {
+            return BadRequest(new { error = "Credential set name is required." });
+        }
+
+        var created = _credentialSetService.Create(
+            request.Name,
+            request.Provider,
+            request.Username,
+            request.Password);
+
+        _auditLog.Record("OpenVpnCredentialSetCreated", "admin", GetClientIp(), targetId: created.Id, metadata: new()
+        {
+            ["name"] = created.Name,
+            ["provider"] = created.Provider,
+            ["username"] = created.Username
+        });
+
+        return Ok(new
+        {
+            success = true,
+            credentialSet = created,
+            message = $"Credential set '{created.Name}' created."
+        });
+    }
+
+    [HttpPut("openvpn/credential-sets/{id}")]
+    public IActionResult UpdateCredentialSet(string id, [FromBody] UpdateCredentialSetRequest request)
+    {
+        if (request == null) return BadRequest(new { error = "Invalid payload." });
+
+        var success = _credentialSetService.Update(
+            id,
+            request.Name,
+            request.Provider,
+            request.Username,
+            request.Password);
+
+        if (!success) return NotFound(new { error = "Credential set not found." });
+
+        _auditLog.Record("OpenVpnCredentialSetUpdated", "admin", GetClientIp(), targetId: id, metadata: new()
+        {
+            ["name"] = request.Name ?? "Updated",
+            ["passwordRotated"] = (!string.IsNullOrEmpty(request.Password)).ToString()
+        });
+
+        return Ok(new { success = true, message = "Credential set updated." });
+    }
+
+    [HttpDelete("openvpn/credential-sets/{id}")]
+    public IActionResult DeleteCredentialSet(string id)
+    {
+        var success = _credentialSetService.Delete(id);
+        if (!success) return NotFound(new { error = "Credential set not found." });
+
+        _auditLog.Record("OpenVpnCredentialSetDeleted", "admin", GetClientIp(), targetId: id);
+        return Ok(new { success = true, message = "Credential set deleted." });
     }
 
     // ----------------------------------------------------
@@ -548,114 +887,22 @@ public class AdminController : ControllerBase
     [HttpGet("audit")]
     public IActionResult GetAuditLog([FromQuery] int limit = 100)
     {
-        var logs = _auditLog.GetEvents(Math.Clamp(limit, 10, 500));
-        return Ok(logs);
+        var events = _auditLog.GetEvents(limit);
+        return Ok(events);
     }
 
-    [HttpGet("system")]
+    [HttpGet("system/info")]
     public IActionResult GetSystemInfo()
     {
-        var activeGen = _store.GetActiveGenerationNumber();
-        var allServers = _store.GetServers();
-        var allClients = _enrollmentService.GetClients();
-        var allKeys = _accessKeyService.GetAllKeys();
-
         return Ok(new
         {
-            health = "Healthy",
-            environment = "Production",
-            framework = ".NET 8 (ASP.NET Core)",
-            storage = "Persistent Railway Volume (/app/storage)",
-            activeGeneration = activeGen,
-            totalServersCount = allServers.Count,
-            enabledServersCount = allServers.Count(s => s.Enabled),
-            totalClientsCount = allClients.Count,
-            activeClientsCount = allClients.Count(c => c.IsActive),
-            totalAccessKeysCount = allKeys.Count,
-            activeAccessKeysCount = allKeys.Count(k => k.Status == AccessKeyStatus.Active),
-            serverTimeUtc = DateTime.UtcNow
+            osVersion = Environment.OSVersion.ToString(),
+            runtime = Environment.Version.ToString(),
+            processorCount = Environment.ProcessorCount,
+            machineName = Environment.MachineName,
+            is64Bit = Environment.Is64BitProcess,
+            uptimeSeconds = (DateTime.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime()).TotalSeconds,
+            memoryBytes = GC.GetTotalMemory(false)
         });
-    }
-
-    // ----------------------------------------------------
-    // LEGACY MAINTAINER COMPATIBILITY
-    // ----------------------------------------------------
-
-    [HttpPost("publish")]
-    public IActionResult PublishGeneration([FromBody] SignedManifest manifest)
-    {
-        if (manifest == null)
-            return BadRequest(new { error = "Manifest cannot be null." });
-
-        var published = _store.PublishGeneration(manifest, "Maintainer API");
-        if (!published)
-        {
-            return BadRequest(new { error = "Failed to publish generation. Ensure generation number is strictly greater than current active." });
-        }
-
-        _auditLog.Record("GenerationPublished", "Maintainer", GetClientIp(), targetId: manifest.Generation.ToString());
-
-        return Ok(new
-        {
-            success = true,
-            generation = manifest.Generation,
-            message = $"Generation {manifest.Generation} is now active."
-        });
-    }
-
-    [HttpPost("rollback")]
-    public IActionResult Rollback([FromBody] RollbackRequest request)
-    {
-        if (request == null || request.TargetGeneration <= 0)
-            return BadRequest(new { error = "Invalid target generation number." });
-
-        var success = _store.RollbackToGeneration(request.TargetGeneration);
-        if (!success)
-        {
-            return BadRequest(new { error = $"Rollback failed. Generation {request.TargetGeneration} does not exist." });
-        }
-
-        _auditLog.Record("GenerationPublished", "Maintainer", GetClientIp(), targetId: request.TargetGeneration.ToString(), metadata: new() { ["action"] = "Rollback" });
-
-        return Ok(new
-        {
-            success = true,
-            activeGeneration = request.TargetGeneration,
-            message = $"Successfully rolled back active generation to {request.TargetGeneration}."
-        });
-    }
-
-    [HttpPost("tickets")]
-    public IActionResult CreateTicket([FromBody] CreateTicketRequest request)
-    {
-        var validity = request?.ValidityMinutes > 0 ? request.ValidityMinutes : 30;
-        var description = request?.Description ?? "Client Enrollment";
-
-        var (plaintextTicket, record) = _enrollmentService.CreateEnrollmentTicket(validity, description);
-
-        return Ok(new
-        {
-            ticket = plaintextTicket,
-            ticketHash = record.TicketHash,
-            expiresAtUtc = record.ExpiresAtUtc,
-            validityMinutes = validity,
-            message = "Single-use enrollment ticket created successfully."
-        });
-    }
-
-    [HttpGet("tickets")]
-    public IActionResult GetTickets()
-    {
-        var tickets = _enrollmentService.GetTickets();
-        return Ok(tickets);
-    }
-
-    [HttpPost("tickets/{ticketHash}/revoke")]
-    public IActionResult RevokeTicket(string ticketHash)
-    {
-        var success = _enrollmentService.RevokeTicket(ticketHash);
-        if (!success) return NotFound(new { error = "Ticket not found." });
-
-        return Ok(new { success = true, message = "Ticket revoked." });
     }
 }

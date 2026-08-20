@@ -53,6 +53,7 @@ builder.Services.AddControllers();
 // Core backend singleton services
 builder.Services.AddSingleton<AuditLogService>();
 builder.Services.AddSingleton<AccessKeyService>();
+builder.Services.AddSingleton<CredentialSetService>();
 builder.Services.AddSingleton<ProfileStoreService>();
 builder.Services.AddSingleton<ClientEnrollmentService>();
 

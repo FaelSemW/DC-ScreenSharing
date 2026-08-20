@@ -3,109 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>DC-ScreenSharing Administration</title>
-    <meta name="description" content="DC-ScreenSharing Production Web Management Console">
+    <meta name="theme-color" content="#0b0f19">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>DC-ScreenSharing — Admin Console</title>
     <link rel="stylesheet" href="/admin/admin.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 </head>
 <body>
-    <!-- App Container -->
-    <div id="app">
+    <div id="app" class="app-container">
         <!-- Toast Notification Area -->
         <div id="toast-container" class="toast-container"></div>
 
-        <!-- Confirmation Modal -->
-        <div id="confirm-modal" class="modal-backdrop hidden">
-            <div class="modal-card">
-                <div class="modal-header">
-                    <h3 id="confirm-modal-title">Confirm Action</h3>
-                    <button class="icon-btn close-modal-btn" onclick="closeConfirmModal()">&times;</button>
-                </div>
-                <div class="modal-body" id="confirm-modal-body"></div>
-                <div class="modal-footer" id="confirm-modal-footer">
-                    <button class="btn btn-secondary" onclick="closeConfirmModal()">Cancel</button>
-                    <button class="btn btn-danger" id="confirm-modal-btn">Confirm</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Key Created Modal -->
-        <div id="key-created-modal" class="modal-backdrop hidden">
-            <div class="modal-card">
-                <div class="modal-header">
-                    <h3>Access Key Generated</h3>
-                    <button class="icon-btn close-modal-btn" onclick="closeKeyCreatedModal()">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <div class="alert alert-warning">
-                        <strong>Important:</strong> Copy this access key now. For security, the plaintext code is never stored and cannot be retrieved again.
-                    </div>
-                    <div class="key-display-box">
-                        <span id="created-key-code" class="code-text">DCSS-XXXX-XXXX-XXXX-XXXX</span>
-                    </div>
-                    <div class="key-meta-details" id="created-key-meta"></div>
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-primary btn-block" id="copy-created-key-btn" onclick="copyCreatedKey()">
-                        <svg class="btn-icon" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M16 1H4C2.9 1 2 1.9 2 3v14h2V3h12V1zm3 4H8C6.9 5 6 5.9 6 7v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
-                        Copy Access Key
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Generate Key Modal -->
+        <!-- GENERATE KEY MODAL -->
         <div id="generate-key-modal" class="modal-backdrop hidden">
             <div class="modal-card">
                 <div class="modal-header">
-                    <h3>Generate Access Key</h3>
+                    <h3>Create Access Key</h3>
                     <button class="icon-btn close-modal-btn" onclick="closeGenerateKeyModal()">&times;</button>
                 </div>
                 <div class="modal-body">
                     <form id="generate-key-form" onsubmit="handleGenerateKey(event)">
                         <div class="form-group">
                             <label for="key-name">Key Name / Description</label>
-                            <input type="text" id="key-name" class="form-control" placeholder="e.g. VIP Gaming Group, Beta Tester #1" required maxlength="64">
+                            <input type="text" id="key-name" class="form-control" placeholder="e.g. VIP Subscriber - John Doe" required maxlength="64">
                         </div>
 
                         <div class="form-group">
-                            <label>Key Type</label>
-                            <div class="radio-cards">
-                                <label class="radio-card">
-                                    <input type="radio" name="key-type" value="SINGLE_USE" checked onchange="toggleKeyTypeFields()">
-                                    <div class="radio-card-body">
-                                        <div class="radio-title">Single Use</div>
-                                        <div class="radio-desc">Valid for exactly 1 client activation</div>
-                                    </div>
-                                </label>
-                                <label class="radio-card">
-                                    <input type="radio" name="key-type" value="GROUP" onchange="toggleKeyTypeFields()">
-                                    <div class="radio-card-body">
-                                        <div class="radio-title">Group Key</div>
-                                        <div class="radio-desc">Authorizes multiple independent clients</div>
-                                    </div>
-                                </label>
-                            </div>
-                        </div>
-
-                        <div class="form-group" id="group-max-uses-group" style="display: none;">
-                            <label for="key-max-uses">Max Activations</label>
-                            <select id="key-max-uses" class="form-control">
-                                <option value="unlimited">Unlimited</option>
-                                <option value="5">5 Clients</option>
-                                <option value="10">10 Clients</option>
-                                <option value="25">25 Clients</option>
-                                <option value="50">50 Clients</option>
-                                <option value="100">100 Clients</option>
-                                <option value="custom">Custom Number...</option>
+                            <label for="key-type">Key Type</label>
+                            <select id="key-type" class="form-control" onchange="toggleKeyTypeOptions()">
+                                <option value="SINGLE_USE">Single-Use (1 Client Only)</option>
+                                <option value="GROUP">Group Key (Multi-Client)</option>
                             </select>
-                            <input type="number" id="key-custom-max-uses" class="form-control mt-2 hidden" placeholder="Enter custom maximum" min="1" max="10000">
+                        </div>
+
+                        <div class="form-group hidden" id="group-key-options">
+                            <label for="key-max-uses">Max Allowed Activations (Blank for unlimited)</label>
+                            <input type="number" id="key-max-uses" class="form-control" placeholder="Unlimited" min="1" max="100000">
                         </div>
 
                         <div class="form-group">
-                            <label for="key-expiration">Expiration</label>
+                            <label for="key-expiration">Key Expiration</label>
                             <select id="key-expiration" class="form-control" onchange="toggleCustomExpiration()">
                                 <option value="30d" selected>30 Days</option>
-                                <option value="1h">1 Hour</option>
+                                <option value="1h">1 Hour (Testing)</option>
                                 <option value="24h">24 Hours</option>
                                 <option value="7d">7 Days</option>
                                 <option value="90d">90 Days</option>
@@ -125,7 +66,7 @@
             </div>
         </div>
 
-        <!-- Add Server Modal -->
+        <!-- Add WireGuard Server Modal -->
         <div id="add-server-modal" class="modal-backdrop hidden">
             <div class="modal-card">
                 <div class="modal-header">
@@ -136,22 +77,26 @@
                     <form id="add-server-form" onsubmit="handleAddServer(event)">
                         <div class="form-group">
                             <label for="server-display-name">Display Name</label>
-                            <input type="text" id="server-display-name" class="form-control" placeholder="e.g. Argentina (Buenos Aires)" required maxlength="64">
+                            <input type="text" id="server-display-name" class="form-control" placeholder="e.g. United States (East)" required maxlength="64">
                         </div>
                         <div class="form-row">
                             <div class="form-group col">
                                 <label for="server-country">Country Code</label>
-                                <input type="text" id="server-country" class="form-control" placeholder="AR" required maxlength="10">
+                                <input type="text" id="server-country" class="form-control" placeholder="US" required maxlength="10">
                             </div>
                             <div class="form-group col">
                                 <label for="server-region">Region / City</label>
-                                <input type="text" id="server-region" class="form-control" placeholder="Buenos Aires" maxlength="32">
+                                <input type="text" id="server-region" class="form-control" placeholder="Virginia" maxlength="32">
                             </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="server-provider">Provider</label>
+                            <input type="text" id="server-provider" class="form-control" placeholder="Custom" value="Custom" maxlength="32">
                         </div>
                         <div class="form-group">
                             <label for="server-conf-file">WireGuard Configuration (.conf)</label>
                             <input type="file" id="server-conf-file" class="form-control-file" accept=".conf,.txt" onchange="handleConfFileSelect(event)">
-                            <textarea id="server-conf-text" class="form-control code-editor mt-2" rows="6" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = 10.2.0.2/32&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = ar-01.vpn.net:51820" required></textarea>
+                            <textarea id="server-conf-text" class="form-control code-editor mt-2" rows="6" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = 10.2.0.2/32&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = us-east.vpn.net:51820" required></textarea>
                             <small class="form-text text-muted">The private key is securely stored server-side and never returned to browser.</small>
                         </div>
                         <div class="modal-footer px-0 pb-0">
@@ -159,6 +104,204 @@
                             <button type="submit" class="btn btn-primary" id="submit-add-server-btn">Add to Registry</button>
                         </div>
                     </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add OpenVPN Server Modal -->
+        <div id="add-openvpn-modal" class="modal-backdrop hidden">
+            <div class="modal-card modal-lg">
+                <div class="modal-header">
+                    <h3>Add OpenVPN Server (.ovpn)</h3>
+                    <button class="icon-btn close-modal-btn" onclick="closeAddOpenVpnModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="add-openvpn-form" onsubmit="handleAddOpenVpnServer(event)">
+                        <div class="form-row">
+                            <div class="form-group col">
+                                <label for="ovpn-display-name">Display Name</label>
+                                <input type="text" id="ovpn-display-name" class="form-control" placeholder="e.g. Argentina (Buenos Aires)" required maxlength="64">
+                            </div>
+                            <div class="form-group col">
+                                <label for="ovpn-provider">Provider</label>
+                                <select id="ovpn-provider" class="form-control" onchange="handleProviderChange()">
+                                    <option value="Proton">Proton VPN</option>
+                                    <option value="VPNBook">VPNBook</option>
+                                    <option value="Custom" selected>Custom / Other</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group col">
+                                <label for="ovpn-country">Country</label>
+                                <input type="text" id="ovpn-country" class="form-control" placeholder="Argentina" required maxlength="32">
+                            </div>
+                            <div class="form-group col">
+                                <label for="ovpn-country-code">Country Code (2 letters)</label>
+                                <input type="text" id="ovpn-country-code" class="form-control" placeholder="AR" required maxlength="10">
+                            </div>
+                            <div class="form-group col">
+                                <label for="ovpn-city">City / Region (Optional)</label>
+                                <input type="text" id="ovpn-city" class="form-control" placeholder="Buenos Aires" maxlength="32">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ovpn-credential-set">Credential Set (Recommended for provider accounts)</label>
+                            <select id="ovpn-credential-set" class="form-control" onchange="toggleInlineCredentials()">
+                                <option value="">None / Inline Certificate Only</option>
+                                <!-- Populated dynamically -->
+                            </select>
+                        </div>
+
+                        <div id="ovpn-inline-creds" class="form-row hidden">
+                            <div class="form-group col">
+                                <label for="ovpn-username">Username</label>
+                                <input type="text" id="ovpn-username" class="form-control" placeholder="VPN Username" autocomplete="off">
+                            </div>
+                            <div class="form-group col">
+                                <label for="ovpn-password">Password</label>
+                                <input type="password" id="ovpn-password" class="form-control" placeholder="VPN Password" autocomplete="off">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>OpenVPN Profile (.ovpn)</label>
+                            <div class="dropzone" id="ovpn-dropzone" onclick="document.getElementById('ovpn-file-input').click()">
+                                <div class="dropzone-icon">📄</div>
+                                <div class="dropzone-text">Click or Drag & Drop .ovpn file here</div>
+                                <div class="dropzone-hint">Supports Proton, VPNBook, and standards-compliant OpenVPN client files</div>
+                            </div>
+                            <input type="file" id="ovpn-file-input" class="hidden" accept=".ovpn,.conf,.txt" onchange="handleOvpnFileSelect(event)">
+                            <textarea id="ovpn-file-text" class="form-control code-editor mt-2" rows="6" placeholder="client&#10;dev tun&#10;proto udp&#10;remote 185.159.157.1 1194&#10;resolv-retry infinite&#10;nobind&#10;persist-key&#10;persist-tun&#10;cipher AES-256-GCM&#10;auth SHA512&#10;auth-user-pass&#10;<ca>&#10;...&#10;</ca>" required oninput="validateOvpnLive()"></textarea>
+                        </div>
+
+                        <!-- Live Validation Result Box -->
+                        <div id="ovpn-validation-box" class="validation-preview hidden">
+                            <div class="validation-title" id="val-status-title">
+                                <span>🔍</span> Configuration Validation
+                            </div>
+                            <div class="validation-grid" id="val-grid"></div>
+                            <div id="val-error-msg" class="alert alert-danger mt-2 hidden"></div>
+                        </div>
+
+                        <div class="modal-footer px-0 pb-0">
+                            <button type="button" class="btn btn-secondary" onclick="closeAddOpenVpnModal()">Cancel</button>
+                            <button type="submit" class="btn btn-primary" id="submit-add-ovpn-btn">Import OpenVPN Server</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bulk Import OpenVPN Modal -->
+        <div id="bulk-openvpn-modal" class="modal-backdrop hidden">
+            <div class="modal-card modal-lg">
+                <div class="modal-header">
+                    <h3>Bulk Import OpenVPN Servers</h3>
+                    <button class="icon-btn close-modal-btn" onclick="closeBulkOpenVpnModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="bulk-openvpn-form" onsubmit="handleBulkImportOpenVpn(event)">
+                        <div class="form-row">
+                            <div class="form-group col">
+                                <label for="bulk-provider">Provider</label>
+                                <select id="bulk-provider" class="form-control">
+                                    <option value="Proton">Proton VPN</option>
+                                    <option value="VPNBook">VPNBook</option>
+                                    <option value="Custom" selected>Custom / Other</option>
+                                </select>
+                            </div>
+                            <div class="form-group col">
+                                <label for="bulk-cred-set">Default Credential Set</label>
+                                <select id="bulk-cred-set" class="form-control">
+                                    <option value="">None (Inline / Cert)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Select .ovpn Files</label>
+                            <div class="dropzone" id="bulk-dropzone" onclick="document.getElementById('bulk-files-input').click()">
+                                <div class="dropzone-icon">📁</div>
+                                <div class="dropzone-text">Click or Drag & Drop multiple .ovpn files here</div>
+                                <div class="dropzone-hint">Upload 1 to 50+ OpenVPN profile files at once</div>
+                            </div>
+                            <input type="file" id="bulk-files-input" class="hidden" accept=".ovpn,.conf" multiple onchange="handleBulkFilesSelect(event)">
+                        </div>
+
+                        <div id="bulk-preview-container" class="mt-3 hidden">
+                            <label>Detected Profiles (<span id="bulk-files-count">0</span>)</label>
+                            <div class="card p-0" style="max-height: 220px; overflow-y: auto;">
+                                <div id="bulk-files-list" class="p-2"></div>
+                            </div>
+                        </div>
+
+                        <div class="modal-footer px-0 pb-0">
+                            <button type="button" class="btn btn-secondary" onclick="closeBulkOpenVpnModal()">Cancel</button>
+                            <button type="submit" class="btn btn-primary" id="submit-bulk-ovpn-btn">Import All Profiles</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Credential Sets Modal -->
+        <div id="credential-sets-modal" class="modal-backdrop hidden">
+            <div class="modal-card modal-lg">
+                <div class="modal-header">
+                    <h3>OpenVPN Credential Sets</h3>
+                    <button class="icon-btn close-modal-btn" onclick="closeCredentialSetsModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="section-toolbar mb-3">
+                        <span class="toolbar-info">Reusable credentials with zero plaintext exposure</span>
+                        <button class="btn btn-primary btn-sm" onclick="openCreateCredSetForm()">
+                            <svg class="btn-icon" viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                            New Credential Set
+                        </button>
+                    </div>
+
+                    <!-- Create/Edit Form inside Modal -->
+                    <div id="cred-set-editor" class="card p-3 mb-3 hidden" style="border-color: var(--accent-primary);">
+                        <h4 id="cred-set-editor-title" style="margin-bottom: 12px; font-size: 14px;">New Credential Set</h4>
+                        <form id="cred-set-form" onsubmit="handleSaveCredSet(event)">
+                            <input type="hidden" id="cred-set-edit-id" value="">
+                            <div class="form-row">
+                                <div class="form-group col">
+                                    <label for="cred-set-name">Name / Description</label>
+                                    <input type="text" id="cred-set-name" class="form-control" placeholder="e.g. Proton Main Account" required maxlength="64">
+                                </div>
+                                <div class="form-group col">
+                                    <label for="cred-set-provider">Provider</label>
+                                    <select id="cred-set-provider" class="form-control">
+                                        <option value="Proton">Proton VPN</option>
+                                        <option value="VPNBook">VPNBook</option>
+                                        <option value="Custom">Custom</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group col">
+                                    <label for="cred-set-username">Username</label>
+                                    <input type="text" id="cred-set-username" class="form-control" placeholder="VPN Username" required autocomplete="off">
+                                </div>
+                                <div class="form-group col">
+                                    <label for="cred-set-password">Password (AES-GCM Encrypted)</label>
+                                    <input type="password" id="cred-set-password" class="form-control" placeholder="Enter password (leave blank to keep current)" autocomplete="off">
+                                </div>
+                            </div>
+                            <div class="modal-footer px-0 pb-0">
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="closeCredSetForm()">Cancel</button>
+                                <button type="submit" class="btn btn-primary btn-sm" id="submit-cred-set-btn">Save Credential Set</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div id="cred-sets-list-container">
+                        <div class="loading-state">Loading credential sets...</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -204,157 +347,111 @@
             </div>
         </div>
 
-        <!-- MAIN ADMIN APP VIEW -->
-        <div id="admin-view" class="admin-layout hidden">
-            <!-- Sidebar (Desktop) -->
-            <aside class="sidebar">
-                <div class="sidebar-brand">
-                    <div class="brand-logo-small">
-                        <svg viewBox="0 0 24 24" width="24" height="24"><path fill="#5865F2" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/></svg>
-                    </div>
-                    <span class="brand-title">DCSS Admin</span>
+        <!-- MAIN DASHBOARD VIEW -->
+        <div id="dashboard-view" class="dashboard-wrapper hidden">
+            <!-- Header Bar -->
+            <header class="app-header">
+                <div class="header-brand">
+                    <span class="logo-shield">🛡️</span>
+                    <span class="brand-title">DC-ScreenSharing <span class="badge badge-accent">Admin</span></span>
                 </div>
 
-                <nav class="nav-menu">
-                    <a href="#dashboard" class="nav-item active" onclick="navigateTo('dashboard', event)">
-                        <svg class="nav-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
-                        <span>Dashboard</span>
-                    </a>
-                    <a href="#access-keys" class="nav-item" onclick="navigateTo('access-keys', event)">
-                        <svg class="nav-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
-                        <span>Access Keys</span>
-                    </a>
-                    <a href="#clients" class="nav-item" onclick="navigateTo('clients', event)">
-                        <svg class="nav-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
-                        <span>Clients</span>
-                    </a>
-                    <a href="#servers" class="nav-item" onclick="navigateTo('servers', event)">
-                        <svg class="nav-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/></svg>
-                        <span>Servers</span>
-                    </a>
-                    <a href="#generations" class="nav-item" onclick="navigateTo('generations', event)">
-                        <svg class="nav-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
-                        <span>Generations</span>
-                    </a>
-                    <a href="#audit" class="nav-item" onclick="navigateTo('audit', event)">
-                        <svg class="nav-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                        <span>Audit Log</span>
-                    </a>
-                    <a href="#system" class="nav-item" onclick="navigateTo('system', event)">
-                        <svg class="nav-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-                        <span>System</span>
-                    </a>
-                </nav>
-
-                <div class="sidebar-footer">
-                    <button class="logout-btn" onclick="handleLogout()">
-                        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
-                        <span>Sign Out</span>
+                <div class="header-actions">
+                    <button class="icon-btn" onclick="handleLogout()" title="Sign Out">
+                        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
                     </button>
                 </div>
-            </aside>
+            </header>
 
-            <!-- Main Content Area -->
-            <main class="main-content">
-                <!-- Top Header (Mobile & Desktop) -->
-                <header class="top-header">
-                    <div class="header-left">
-                        <div class="brand-mobile">
-                            <svg viewBox="0 0 24 24" width="24" height="24"><path fill="#5865F2" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/></svg>
-                            <span>DCSS Admin</span>
-                        </div>
-                        <h1 id="page-title" class="page-title">Dashboard</h1>
-                    </div>
-                    <div class="header-right">
-                        <span class="status-indicator">
-                            <span class="status-dot"></span>
-                            <span class="status-text">Production Online</span>
-                        </span>
-                    </div>
-                </header>
+            <!-- Main Layout with Desktop Sidebar & Mobile Content -->
+            <main class="app-main">
+                <!-- Desktop Sidebar -->
+                <aside class="sidebar">
+                    <nav class="sidebar-nav">
+                        <a href="#dashboard" class="nav-item active" onclick="navigateTo('dashboard', event)">
+                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+                            <span>Dashboard</span>
+                        </a>
+                        <a href="#access-keys" class="nav-item" onclick="navigateTo('access-keys', event)">
+                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
+                            <span>Access Keys</span>
+                        </a>
+                        <a href="#clients" class="nav-item" onclick="navigateTo('clients', event)">
+                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+                            <span>Enrolled Clients</span>
+                        </a>
+                        <a href="#servers" class="nav-item" onclick="navigateTo('servers', event)">
+                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/></svg>
+                            <span>Servers (Dual Protocol)</span>
+                        </a>
+                        <a href="#generations" class="nav-item" onclick="navigateTo('generations', event)">
+                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                            <span>Generations</span>
+                        </a>
+                        <a href="#audit" class="nav-item" onclick="navigateTo('audit', event)">
+                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+                            <span>Audit Log</span>
+                        </a>
+                        <a href="#system" class="nav-item" onclick="navigateTo('system', event)">
+                            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                            <span>System Info</span>
+                        </a>
+                    </nav>
+                </aside>
 
-                <!-- Page Content Sections -->
+                <!-- Page Content Area -->
                 <div class="content-container">
                     <!-- SECTION: DASHBOARD -->
                     <section id="section-dashboard" class="page-section">
-                        <div class="stats-grid">
-                            <div class="stat-card">
-                                <div class="stat-icon-wrapper blue">
-                                    <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
-                                </div>
-                                <div class="stat-data">
-                                    <span class="stat-value" id="stat-active-clients">0</span>
-                                    <span class="stat-label">Active Clients</span>
-                                </div>
-                            </div>
+                        <div class="section-toolbar">
+                            <span class="toolbar-info">Overview & Metrics</span>
+                            <button class="btn btn-secondary" onclick="loadDashboard()">Refresh</button>
+                        </div>
 
-                            <div class="stat-card">
-                                <div class="stat-icon-wrapper green">
-                                    <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
-                                </div>
-                                <div class="stat-data">
-                                    <span class="stat-value" id="stat-active-keys">0</span>
-                                    <span class="stat-label">Active Access Keys</span>
-                                </div>
+                        <div class="metrics-grid mt-3">
+                            <div class="metric-card">
+                                <div class="metric-value" id="metric-active-clients">0</div>
+                                <div class="metric-label">Active Clients</div>
                             </div>
-
-                            <div class="stat-card">
-                                <div class="stat-icon-wrapper amber">
-                                    <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
-                                </div>
-                                <div class="stat-data">
-                                    <span class="stat-value" id="stat-group-keys">0</span>
-                                    <span class="stat-label">Group Keys</span>
-                                </div>
+                            <div class="metric-card">
+                                <div class="metric-value" id="metric-active-keys">0</div>
+                                <div class="metric-label">Active Access Keys</div>
                             </div>
-
-                            <div class="stat-card">
-                                <div class="stat-icon-wrapper purple">
-                                    <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/></svg>
-                                </div>
-                                <div class="stat-data">
-                                    <span class="stat-value" id="stat-available-servers">0</span>
-                                    <span class="stat-label">Active Servers</span>
-                                </div>
+                            <div class="metric-card">
+                                <div class="metric-value" id="metric-wg-servers">0</div>
+                                <div class="metric-label">WireGuard Servers</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value" id="metric-ovpn-servers">0</div>
+                                <div class="metric-label">OpenVPN Servers</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value" id="metric-generation">Gen 1</div>
+                                <div class="metric-label">Active Generation</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value text-success" id="metric-health">Healthy</div>
+                                <div class="metric-label">Backend Status</div>
                             </div>
                         </div>
 
-                        <!-- Quick Actions -->
-                        <div class="quick-actions-bar mt-4">
-                            <button class="btn btn-primary" onclick="openGenerateKeyModal()">
-                                <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                                Generate Key
-                            </button>
-                            <button class="btn btn-secondary" onclick="openAddServerModal()">
-                                <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                                Add Server
-                            </button>
-                            <button class="btn btn-accent" onclick="handleCompileAndPublishGeneration()">
-                                <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
-                                Publish Generation
-                            </button>
+                        <!-- Recent Key Activations -->
+                        <div class="card mt-4">
+                            <div class="card-header">
+                                <h3>Recent Client Activations</h3>
+                            </div>
+                            <div class="card-body p-0" id="dashboard-activations">
+                                <div class="loading-state">Loading recent activations...</div>
+                            </div>
                         </div>
 
-                        <!-- Dashboard Cards Split -->
-                        <div class="dashboard-split mt-4">
-                            <div class="card">
-                                <div class="card-header">
-                                    <h3>Recent Client Activations</h3>
-                                    <a href="#clients" onclick="navigateTo('clients', event)" class="link-btn">View All</a>
-                                </div>
-                                <div class="card-body p-0" id="dash-recent-activations">
-                                    <div class="loading-state">Loading...</div>
-                                </div>
+                        <!-- Recent Audit Feed -->
+                        <div class="card mt-4">
+                            <div class="card-header">
+                                <h3>Recent Security Events</h3>
                             </div>
-
-                            <div class="card">
-                                <div class="card-header">
-                                    <h3>Recent Audit Events</h3>
-                                    <a href="#audit" onclick="navigateTo('audit', event)" class="link-btn">View All</a>
-                                </div>
-                                <div class="card-body p-0" id="dash-recent-audit">
-                                    <div class="loading-state">Loading...</div>
-                                </div>
+                            <div class="card-body p-0" id="dashboard-audit">
+                                <div class="loading-state">Loading audit events...</div>
                             </div>
                         </div>
                     </section>
@@ -362,36 +459,32 @@
                     <!-- SECTION: ACCESS KEYS -->
                     <section id="section-access-keys" class="page-section hidden">
                         <div class="section-toolbar">
-                            <div class="filter-tabs">
-                                <button class="filter-tab active" onclick="filterKeys('all', this)">All</button>
-                                <button class="filter-tab" onclick="filterKeys('active', this)">Active</button>
-                                <button class="filter-tab" onclick="filterKeys('group', this)">Group</button>
-                                <button class="filter-tab" onclick="filterKeys('single', this)">Single-Use</button>
-                            </div>
+                            <span class="toolbar-info">Client Enrollment Keys</span>
                             <button class="btn btn-primary" onclick="openGenerateKeyModal()">
                                 <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                                Generate Key
+                                Generate Access Key
                             </button>
                         </div>
 
                         <div class="card mt-3">
                             <div class="card-body p-0" id="access-keys-container">
-                                <div class="loading-state">Loading keys...</div>
+                                <div class="loading-state">Loading access keys...</div>
                             </div>
                         </div>
                     </section>
 
                     <!-- SECTION: CLIENTS -->
                     <section id="section-clients" class="page-section hidden">
-                        <div class="section-toolbar flex-wrap">
-                            <div class="search-box">
-                                <input type="text" id="client-search-input" class="form-control" placeholder="Search Client ID, key, IP..." oninput="handleClientSearch()">
+                        <div class="section-toolbar">
+                            <div class="filter-group">
+                                <input type="text" id="client-search" class="form-control" placeholder="Search by Client ID or IP..." oninput="filterClients()">
+                                <select id="client-status-filter" class="form-control" onchange="filterClients()">
+                                    <option value="">All Statuses</option>
+                                    <option value="active">Active Only</option>
+                                    <option value="revoked">Revoked Only</option>
+                                </select>
                             </div>
-                            <div class="filter-tabs">
-                                <button class="filter-tab active" onclick="filterClients('all', this)">All</button>
-                                <button class="filter-tab" onclick="filterClients('active', this)">Active</button>
-                                <button class="filter-tab" onclick="filterClients('revoked', this)">Revoked</button>
-                            </div>
+                            <button class="btn btn-secondary" onclick="loadClients()">Refresh</button>
                         </div>
 
                         <div class="card mt-3">
@@ -401,14 +494,44 @@
                         </div>
                     </section>
 
-                    <!-- SECTION: SERVERS -->
+                    <!-- SECTION: SERVERS (DUAL PROTOCOL: WIREGUARD + OPENVPN) -->
                     <section id="section-servers" class="page-section hidden">
-                        <div class="section-toolbar">
-                            <span class="toolbar-info">Catalog Server Registry</span>
+                        <!-- Dual Protocol Top Tabs -->
+                        <div class="protocol-tabs">
+                            <button class="protocol-tab active" id="tab-btn-wireguard" onclick="switchProtocolTab('WIREGUARD')">
+                                <span class="proto-icon">⚡</span> WireGuard <span class="badge badge-subtle" id="wg-count-badge">0</span>
+                            </button>
+                            <button class="protocol-tab" id="tab-btn-openvpn" onclick="switchProtocolTab('OPENVPN')">
+                                <span class="proto-icon">🔒</span> OpenVPN (.ovpn) <span class="badge badge-subtle" id="ovpn-count-badge">0</span>
+                            </button>
+                        </div>
+
+                        <!-- WireGuard Toolbar -->
+                        <div id="wg-toolbar" class="section-toolbar">
+                            <span class="toolbar-info">WireGuard Server Profiles (.conf)</span>
                             <button class="btn btn-primary" onclick="openAddServerModal()">
                                 <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                                Add Server (.conf)
+                                Add WireGuard (.conf)
                             </button>
+                        </div>
+
+                        <!-- OpenVPN Toolbar -->
+                        <div id="ovpn-toolbar" class="section-toolbar hidden">
+                            <span class="toolbar-info">OpenVPN Client Profiles (.ovpn)</span>
+                            <div class="toolbar-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                <button class="btn btn-secondary" onclick="openCredentialSetsModal()">
+                                    <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
+                                    Credential Sets
+                                </button>
+                                <button class="btn btn-secondary" onclick="openBulkOpenVpnModal()">
+                                    <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+                                    Bulk Import (.ovpn)
+                                </button>
+                                <button class="btn btn-primary" onclick="openAddOpenVpnModal()">
+                                    <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                                    Add OpenVPN (.ovpn)
+                                </button>
+                            </div>
                         </div>
 
                         <div class="card mt-3">

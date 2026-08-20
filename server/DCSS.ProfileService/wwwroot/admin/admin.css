@@ -948,6 +948,197 @@ a:hover {
     font-size: 14px;
 }
 
+/* ==========================================================================
+   Dual Protocol & OpenVPN Management Styles
+   ========================================================================== */
+
+.protocol-tabs {
+    display: flex;
+    gap: 8px;
+    background: var(--bg-surface);
+    padding: 6px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-color);
+    margin-bottom: 16px;
+}
+
+.protocol-tab {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: var(--radius-md);
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.protocol-tab:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.protocol-tab.active {
+    background: var(--accent-primary);
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(88, 101, 242, 0.35);
+}
+
+.badge-proton {
+    background: rgba(109, 74, 255, 0.18);
+    color: #a78bfa;
+    border: 1px solid rgba(109, 74, 255, 0.35);
+}
+
+.badge-vpnbook {
+    background: rgba(245, 158, 11, 0.18);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.badge-custom {
+    background: rgba(59, 130, 246, 0.18);
+    color: #60a5fa;
+    border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.badge-udp {
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+}
+
+.badge-tcp {
+    background: rgba(236, 72, 153, 0.15);
+    color: #f472b6;
+}
+
+.badge-credset {
+    background: rgba(139, 92, 246, 0.15);
+    color: #c4b5fd;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.validation-preview {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    margin-top: 12px;
+    transition: all 0.2s ease;
+}
+
+.validation-preview.valid {
+    border-color: var(--accent-success);
+    background: rgba(35, 165, 90, 0.06);
+}
+
+.validation-preview.invalid {
+    border-color: var(--accent-danger);
+    background: rgba(242, 63, 67, 0.06);
+}
+
+.validation-title {
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.validation-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.val-item {
+    font-size: 12px;
+}
+
+.val-label {
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+
+.val-value {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.dropzone {
+    border: 2px dashed var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 24px;
+    text-align: center;
+    background: var(--bg-input);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.dropzone:hover, .dropzone.dragover {
+    border-color: var(--accent-primary);
+    background: rgba(88, 101, 242, 0.05);
+}
+
+.dropzone-icon {
+    font-size: 28px;
+    margin-bottom: 6px;
+}
+
+.dropzone-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.dropzone-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.cred-set-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.cred-set-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.cred-set-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cred-set-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
 @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }

@@ -1,182 +1,50 @@
-/**
- * DC-ScreenSharing Mobile-First Web Admin Application
- */
+// ==========================================================================
+// DC-ScreenSharing — Admin Management Frontend Logic
+// Full Dual-Protocol Support: WireGuard + OpenVPN (.ovpn)
+// ==========================================================================
 
-// Global State
-let currentSection = 'dashboard';
+let currentActiveSection = 'dashboard';
 let currentKeysList = [];
 let currentClientsList = [];
 let currentServersList = [];
+let currentCredentialSetsList = [];
+let currentProtocolTab = 'WIREGUARD';
 let keyFilterMode = 'all';
-let clientFilterMode = 'all';
-let clientSearchQuery = '';
+let validationDebounceTimer = null;
+let bulkFilesToImport = [];
 
-// DOM Content Loaded
-document.addEventListener('DOMContentLoaded', () => {
-    checkSession();
-    window.addEventListener('hashchange', handleHashChange);
+document.addEventListener('DOMContentLoaded', async () => {
+    setupDragAndDrop();
+    await checkSession();
+    handleHashNavigation();
 });
 
-// Toast Notifications
-function showToast(message, type = 'primary') {
-    const container = document.getElementById('toast-container');
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-    container.appendChild(toast);
+window.addEventListener('hashchange', handleHashNavigation);
 
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(-10px)';
-        toast.style.transition = 'all 0.25s ease';
-        setTimeout(() => toast.remove(), 250);
-    }, 3500);
-}
-
-// Confirmation Modal Helper
-function showConfirmDialog(title, message, confirmBtnText, onConfirm, isDanger = true) {
-    const modal = document.getElementById('confirm-modal');
-    document.getElementById('confirm-modal-title').textContent = title;
-    document.getElementById('confirm-modal-body').innerHTML = message;
-    
-    const confirmBtn = document.getElementById('confirm-modal-btn');
-    confirmBtn.textContent = confirmBtnText;
-    confirmBtn.className = isDanger ? 'btn btn-danger' : 'btn btn-primary';
-
-    confirmBtn.onclick = async () => {
-        closeConfirmModal();
-        await onConfirm();
-    };
-
-    modal.classList.remove('hidden');
-}
-
-function closeConfirmModal() {
-    document.getElementById('confirm-modal').classList.add('hidden');
-}
-
-// Session & Auth Management
-async function checkSession() {
-    try {
-        const res = await fetch('/api/v1/admin/auth/session');
-        const data = await res.json();
-        if (data.authenticated) {
-            showAdminView();
-            handleHashChange();
-        } else {
-            showLoginView();
-        }
-    } catch (e) {
-        showLoginView();
-    }
-}
-
-function showLoginView() {
-    document.getElementById('login-view').classList.remove('hidden');
-    document.getElementById('admin-view').classList.add('hidden');
-    document.getElementById('admin-api-key').value = '';
-}
-
-function showAdminView() {
-    document.getElementById('login-view').classList.add('hidden');
-    document.getElementById('admin-view').classList.remove('hidden');
-}
-
-function togglePasswordVisibility(inputId) {
-    const input = document.getElementById(inputId);
-    input.type = input.type === 'password' ? 'text' : 'password';
-}
-
-async function handleLogin(e) {
-    e.preventDefault();
-    const apiKeyInput = document.getElementById('admin-api-key');
-    const loginBtn = document.getElementById('login-btn');
-    const errorBox = document.getElementById('login-error');
-
-    const apiKey = apiKeyInput.value.trim();
-    if (!apiKey) return;
-
-    loginBtn.disabled = true;
-    loginBtn.textContent = 'Signing in...';
-    errorBox.classList.add('hidden');
-
-    try {
-        const res = await fetch('/api/v1/admin/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ apiKey })
-        });
-
-        const data = await res.json();
-        if (res.ok && data.success) {
-            apiKeyInput.value = '';
-            showAdminView();
-            navigateTo('dashboard');
-            showToast('Signed in successfully.', 'success');
-        } else {
-            errorBox.textContent = data.error || 'Invalid administrator credentials.';
-            errorBox.classList.remove('hidden');
-        }
-    } catch (err) {
-        errorBox.textContent = 'Network or server error during sign in.';
-        errorBox.classList.remove('hidden');
-    } finally {
-        loginBtn.disabled = false;
-        loginBtn.textContent = 'Sign In';
-    }
-}
-
-async function handleLogout() {
-    try {
-        await fetch('/api/v1/admin/auth/logout', { method: 'POST' });
-    } catch (e) { }
-    showToast('Signed out.', 'primary');
-    showLoginView();
-}
-
-// Navigation
-function handleHashChange() {
+function handleHashNavigation() {
     const hash = window.location.hash.replace('#', '') || 'dashboard';
     navigateTo(hash);
 }
 
 function navigateTo(sectionId, event) {
     if (event) event.preventDefault();
-    currentSection = sectionId;
+
+    const sections = ['dashboard', 'access-keys', 'clients', 'servers', 'generations', 'audit', 'system'];
+    if (!sections.includes(sectionId)) sectionId = 'dashboard';
+
+    currentActiveSection = sectionId;
     window.location.hash = sectionId;
 
-    // Update section visibility
-    document.querySelectorAll('.page-section').forEach(sec => sec.classList.add('hidden'));
-    const targetSec = document.getElementById(`section-${sectionId}`);
-    if (targetSec) {
-        targetSec.classList.remove('hidden');
-    }
-
-    // Update page title
-    const titleMap = {
-        'dashboard': 'Dashboard',
-        'access-keys': 'Access Keys',
-        'clients': 'Enrolled Clients',
-        'servers': 'Servers & WireGuard',
-        'generations': 'Profile Generations',
-        'audit': 'Audit Log',
-        'system': 'System Health'
-    };
-    document.getElementById('page-title').textContent = titleMap[sectionId] || 'Dashboard';
-
-    // Update Nav Active State
-    document.querySelectorAll('.nav-item').forEach(el => {
-        el.classList.toggle('active', el.getAttribute('href') === `#${sectionId}`);
-    });
-    document.querySelectorAll('.bottom-nav-item').forEach(el => {
-        el.classList.toggle('active', el.getAttribute('href') === `#${sectionId}`);
+    sections.forEach(s => {
+        const el = document.getElementById(`section-${s}`);
+        if (el) el.classList.toggle('hidden', s !== sectionId);
     });
 
-    // Load section data
-    loadSectionData(sectionId);
-}
+    document.querySelectorAll('.sidebar-nav .nav-item, .bottom-nav .bottom-nav-item').forEach(item => {
+        const href = item.getAttribute('href')?.replace('#', '');
+        item.classList.toggle('active', href === sectionId);
+    });
 
-function loadSectionData(sectionId) {
     switch (sectionId) {
         case 'dashboard': loadDashboard(); break;
         case 'access-keys': loadAccessKeys(); break;
@@ -188,19 +56,133 @@ function loadSectionData(sectionId) {
     }
 }
 
-// API Fetch Helper with Session Expiration Handling
+// ==========================================================================
+// AUTHENTICATION & SESSION
+// ==========================================================================
+
+async function checkSession() {
+    try {
+        const res = await fetch('/api/v1/admin/auth/session');
+        const data = await res.json();
+
+        if (data.authenticated) {
+            document.getElementById('login-view').classList.add('hidden');
+            document.getElementById('dashboard-view').classList.remove('hidden');
+            loadDashboard();
+        } else {
+            showLoginView();
+        }
+    } catch (err) {
+        showLoginView();
+    }
+}
+
+function showLoginView() {
+    document.getElementById('dashboard-view').classList.add('hidden');
+    document.getElementById('login-view').classList.remove('hidden');
+}
+
+async function handleLogin(e) {
+    e.preventDefault();
+    const btn = document.getElementById('login-btn');
+    const errBox = document.getElementById('login-error');
+    const apiKey = document.getElementById('admin-api-key').value.trim();
+
+    btn.disabled = true;
+    btn.textContent = 'Authenticating...';
+    errBox.classList.add('hidden');
+
+    try {
+        const res = await fetch('/api/v1/admin/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+            document.getElementById('admin-api-key').value = '';
+            document.getElementById('login-view').classList.add('hidden');
+            document.getElementById('dashboard-view').classList.remove('hidden');
+            showToast('Welcome back, Administrator.', 'success');
+            loadDashboard();
+        } else {
+            errBox.textContent = data.error || 'Authentication failed. Please verify your admin access key.';
+            errBox.classList.remove('hidden');
+        }
+    } catch (err) {
+        errBox.textContent = 'Connection failed. Please ensure the server is running.';
+        errBox.classList.remove('hidden');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+    }
+}
+
+async function handleLogout() {
+    try {
+        await fetch('/api/v1/admin/auth/logout', { method: 'POST' });
+    } catch { }
+    showLoginView();
+    showToast('Signed out successfully.', 'info');
+}
+
+function togglePasswordVisibility(inputId) {
+    const input = document.getElementById(inputId);
+    if (input) input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+// ==========================================================================
+// API HELPER & TOASTS
+// ==========================================================================
+
 async function apiFetch(url, options = {}) {
     try {
         const res = await fetch(url, options);
         if (res.status === 401) {
-            showToast('Session expired. Please sign in again.', 'danger');
             showLoginView();
-            throw new Error('Unauthorized');
+            throw new Error('Session expired.');
         }
         return res;
     } catch (e) {
         throw e;
     }
+}
+
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `
+        <span class="toast-icon">${type === 'success' ? '✓' : type === 'danger' ? '✕' : 'ℹ'}</span>
+        <span class="toast-message">${escapeHtml(message)}</span>
+    `;
+
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-10px)';
+        setTimeout(() => toast.remove(), 250);
+    }, 4000);
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return 'Never';
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? 'Invalid Date' : d.toLocaleString();
 }
 
 // ==========================================================================
@@ -212,62 +194,76 @@ async function loadDashboard() {
         const res = await apiFetch('/api/v1/admin/dashboard');
         const data = await res.json();
 
-        document.getElementById('stat-active-clients').textContent = data.activeClientsCount || 0;
-        document.getElementById('stat-active-keys').textContent = data.activeKeysCount || 0;
-        document.getElementById('stat-group-keys').textContent = data.groupKeysCount || 0;
-        document.getElementById('stat-available-servers').textContent = data.availableServersCount || 0;
+        // Update top metrics
+        const actClients = document.getElementById('metric-active-clients') || document.getElementById('stat-active-clients');
+        if (actClients) actClients.textContent = data.activeClientsCount || 0;
+
+        const actKeys = document.getElementById('metric-active-keys') || document.getElementById('stat-active-keys');
+        if (actKeys) actKeys.textContent = data.activeKeysCount || 0;
+
+        const wgServers = document.getElementById('metric-wg-servers');
+        if (wgServers) wgServers.textContent = data.wireGuardServersCount || 0;
+
+        const ovpnServers = document.getElementById('metric-ovpn-servers');
+        if (ovpnServers) ovpnServers.textContent = data.openVpnServersCount || 0;
+
+        const genEl = document.getElementById('metric-generation');
+        if (genEl) genEl.textContent = `Gen ${data.currentGeneration || 1}`;
 
         // Render Recent Activations
-        const actBox = document.getElementById('dash-recent-activations');
-        if (data.recentActivations && data.recentActivations.length > 0) {
-            actBox.innerHTML = `
-                <div class="item-list">
-                    ${data.recentActivations.map(c => `
-                        <div class="list-row">
-                            <div class="row-main">
-                                <div class="row-title-line">
-                                    <span class="row-title">${c.clientId.substring(0, 12)}...</span>
-                                    <span class="badge ${c.isActive ? 'badge-active' : 'badge-revoked'}">${c.isActive ? 'Active' : 'Revoked'}</span>
-                                    <span class="badge ${c.accessKeyType === 'GROUP' ? 'badge-group' : 'badge-single'}">${c.accessKeyType}</span>
-                                </div>
-                                <div class="row-meta">
-                                    <span>Key: ${escapeHtml(c.accessKeyName || 'N/A')}</span>
-                                    <span>${formatDate(c.enrolledAtUtc)}</span>
+        const actBox = document.getElementById('dashboard-activations') || document.getElementById('dash-recent-activations');
+        if (actBox) {
+            if (data.recentActivations && data.recentActivations.length > 0) {
+                actBox.innerHTML = `
+                    <div class="item-list">
+                        ${data.recentActivations.map(c => `
+                            <div class="list-row">
+                                <div class="row-main">
+                                    <div class="row-title-line">
+                                        <span class="row-title">${escapeHtml(c.clientId.substring(0, 12))}...</span>
+                                        <span class="badge ${c.isActive ? 'badge-active' : 'badge-revoked'}">${c.isActive ? 'Active' : 'Revoked'}</span>
+                                        <span class="badge ${c.accessKeyType === 'GROUP' ? 'badge-group' : 'badge-single'}">${escapeHtml(c.accessKeyType)}</span>
+                                    </div>
+                                    <div class="row-meta">
+                                        <span>Key: ${escapeHtml(c.accessKeyName || 'N/A')}</span>
+                                        <span>${formatDate(c.enrolledAtUtc)}</span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-        } else {
-            actBox.innerHTML = '<div class="empty-state">No client activations recorded yet.</div>';
+                        `).join('')}
+                    </div>
+                `;
+            } else {
+                actBox.innerHTML = '<div class="empty-state">No client activations recorded yet.</div>';
+            }
         }
 
         // Render Recent Audit
-        const auditBox = document.getElementById('dash-recent-audit');
-        if (data.recentAudit && data.recentAudit.length > 0) {
-            auditBox.innerHTML = `
-                <div class="item-list">
-                    ${data.recentAudit.map(a => `
-                        <div class="list-row">
-                            <div class="row-main">
-                                <div class="row-title-line">
-                                    <span class="row-title">${formatActionName(a.action)}</span>
-                                    <span class="badge badge-single">${a.actor}</span>
-                                </div>
-                                <div class="row-meta">
-                                    <span>${formatDate(a.timestampUtc)}</span>
-                                    <span>IP: ${a.clientIp}</span>
+        const auditBox = document.getElementById('dashboard-audit') || document.getElementById('dash-recent-audit');
+        if (auditBox) {
+            if (data.recentAudit && data.recentAudit.length > 0) {
+                auditBox.innerHTML = `
+                    <div class="item-list">
+                        ${data.recentAudit.map(a => `
+                            <div class="list-row">
+                                <div class="row-main">
+                                    <div class="row-title-line">
+                                        <span class="row-title">${escapeHtml(a.action)}</span>
+                                        <span class="badge badge-single">${escapeHtml(a.actor)}</span>
+                                    </div>
+                                    <div class="row-meta">
+                                        <span>${formatDate(a.timestampUtc)}</span>
+                                        <span>IP: ${escapeHtml(a.clientIp)}</span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-        } else {
-            auditBox.innerHTML = '<div class="empty-state">No audit events recorded yet.</div>';
+                        `).join('')}
+                    </div>
+                `;
+            } else {
+                auditBox.innerHTML = '<div class="empty-state">No audit events recorded yet.</div>';
+            }
         }
-
     } catch (e) { }
 }
 
@@ -277,6 +273,7 @@ async function loadDashboard() {
 
 async function loadAccessKeys() {
     const container = document.getElementById('access-keys-container');
+    if (!container) return;
     container.innerHTML = '<div class="loading-state">Loading access keys...</div>';
 
     try {
@@ -288,55 +285,41 @@ async function loadAccessKeys() {
     }
 }
 
-function filterKeys(mode, btn) {
-    keyFilterMode = mode;
-    document.querySelectorAll('#section-access-keys .filter-tab').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    renderAccessKeys();
-}
-
 function renderAccessKeys() {
     const container = document.getElementById('access-keys-container');
-    let list = currentKeysList;
+    if (!container) return;
 
-    if (keyFilterMode === 'active') {
-        list = list.filter(k => k.status === 'Active');
-    } else if (keyFilterMode === 'group') {
-        list = list.filter(k => k.type === 'GROUP');
-    } else if (keyFilterMode === 'single') {
-        list = list.filter(k => k.type === 'SINGLE_USE');
-    }
-
-    if (list.length === 0) {
-        container.innerHTML = '<div class="empty-state">No access keys found matching filter.</div>';
+    if (currentKeysList.length === 0) {
+        container.innerHTML = '<div class="empty-state">No access keys found. Click "Generate Access Key" to create one.</div>';
         return;
     }
 
     container.innerHTML = `
         <div class="item-list">
-            ${list.map(k => `
+            ${currentKeysList.map(k => `
                 <div class="list-row">
                     <div class="row-main">
                         <div class="row-title-line">
                             <span class="row-title">${escapeHtml(k.name)}</span>
-                            <span class="badge ${getStatusBadgeClass(k.status)}">${k.status}</span>
-                            <span class="badge ${k.type === 'GROUP' ? 'badge-group' : 'badge-single'}">${k.type}</span>
+                            <span class="badge badge-${k.status.toLowerCase()}">${escapeHtml(k.status)}</span>
+                            <span class="badge ${k.type === 'GROUP' ? 'badge-group' : 'badge-single'}">${k.type === 'GROUP' ? 'Group Key' : 'Single-Use'}</span>
                         </div>
                         <div class="row-meta">
-                            <span>Activations: <strong>${k.useCount} / ${k.maxUses ? k.maxUses : 'Unlimited'}</strong></span>
-                            <span>Expires: <strong>${k.expiresAtUtc ? formatDate(k.expiresAtUtc) : 'Never'}</strong></span>
+                            <span>Uses: <strong>${k.useCount} / ${k.maxUses !== null ? k.maxUses : '∞'}</strong></span>
+                            <span>Expires: ${formatDate(k.expiresAtUtc)}</span>
                             <span>Created: ${formatDate(k.createdAtUtc)}</span>
                         </div>
                     </div>
                     <div class="row-actions">
-                        <button class="btn btn-secondary btn-sm" onclick="viewKeyUsage('${k.id}', '${escapeHtml(k.name)}')">Usage (${k.useCount})</button>
+                        <button class="btn btn-secondary btn-sm" onclick="showKeyUsage('${k.id}')">Usage</button>
                         ${k.status === 'Active' ? `
                             <button class="btn btn-secondary btn-sm" onclick="disableKey('${k.id}')">Disable</button>
-                            <button class="btn btn-danger btn-sm" onclick="promptRevokeKey('${k.id}', '${escapeHtml(k.name)}', ${k.useCount})">Revoke</button>
-                        ` : (k.status === 'Disabled' ? `
+                        ` : k.status === 'Disabled' ? `
                             <button class="btn btn-secondary btn-sm" onclick="enableKey('${k.id}')">Enable</button>
-                            <button class="btn btn-danger btn-sm" onclick="promptRevokeKey('${k.id}', '${escapeHtml(k.name)}', ${k.useCount})">Revoke</button>
-                        ` : '')}
+                        ` : ''}
+                        ${k.status !== 'Revoked' ? `
+                            <button class="btn btn-danger btn-sm" onclick="promptRevokeKey('${k.id}', '${escapeHtml(k.name)}')">Revoke</button>
+                        ` : ''}
                     </div>
                 </div>
             `).join('')}
@@ -347,51 +330,37 @@ function renderAccessKeys() {
 function openGenerateKeyModal() {
     document.getElementById('generate-key-modal').classList.remove('hidden');
     document.getElementById('key-name').value = '';
+    document.getElementById('key-type').value = 'SINGLE_USE';
     document.getElementById('key-expiration').value = '30d';
-    document.getElementById('key-max-uses').value = 'unlimited';
-    toggleKeyTypeFields();
-    toggleCustomExpiration();
+    document.getElementById('key-custom-expiration').classList.add('hidden');
+    document.getElementById('group-key-options').classList.add('hidden');
 }
 
 function closeGenerateKeyModal() {
     document.getElementById('generate-key-modal').classList.add('hidden');
 }
 
-function toggleKeyTypeFields() {
-    const isGroup = document.querySelector('input[name="key-type"]:checked').value === 'GROUP';
-    document.getElementById('group-max-uses-group').style.display = isGroup ? 'block' : 'none';
+function toggleKeyTypeOptions() {
+    const isGroup = document.getElementById('key-type').value === 'GROUP';
+    document.getElementById('group-key-options').classList.toggle('hidden', !isGroup);
 }
 
 function toggleCustomExpiration() {
-    const val = document.getElementById('key-expiration').value;
-    const customInput = document.getElementById('key-custom-expiration');
-    if (val === 'custom') {
-        customInput.classList.remove('hidden');
-        customInput.required = true;
-    } else {
-        customInput.classList.add('hidden');
-        customInput.required = false;
-    }
+    const isCustom = document.getElementById('key-expiration').value === 'custom';
+    document.getElementById('key-custom-expiration').classList.toggle('hidden', !isCustom);
 }
 
 async function handleGenerateKey(e) {
     e.preventDefault();
-    const submitBtn = document.getElementById('submit-gen-key-btn');
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Generating...';
+    const btn = document.getElementById('submit-gen-key-btn');
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
 
     const name = document.getElementById('key-name').value.trim();
-    const type = document.querySelector('input[name="key-type"]:checked').value;
-    const exp = document.getElementById('key-expiration').value;
-    const customExp = document.getElementById('key-custom-expiration').value;
+    const type = document.getElementById('key-type').value;
+    const expiration = document.getElementById('key-expiration').value;
+    const customDate = document.getElementById('key-custom-expiration').value;
     const maxUsesVal = document.getElementById('key-max-uses').value;
-    const customMaxUses = document.getElementById('key-custom-max-uses').value;
-
-    let maxUses = null;
-    if (type === 'GROUP') {
-        if (maxUsesVal === 'custom') maxUses = parseInt(customMaxUses) || null;
-        else if (maxUsesVal !== 'unlimited') maxUses = parseInt(maxUsesVal);
-    }
 
     try {
         const res = await apiFetch('/api/v1/admin/access-keys', {
@@ -400,71 +369,27 @@ async function handleGenerateKey(e) {
             body: JSON.stringify({
                 name,
                 type,
-                expiration: exp,
-                customExpiresAtUtc: exp === 'custom' && customExp ? new Date(customExp).toISOString() : null,
-                maxUses
+                expiration,
+                customExpiresAtUtc: customDate ? new Date(customDate).toISOString() : null,
+                maxUses: maxUsesVal ? parseInt(maxUsesVal, 10) : null
             })
         });
 
         const data = await res.json();
         if (res.ok && data.success) {
             closeGenerateKeyModal();
-            showKeyCreatedModal(data.accessKey, data.record);
+            showToast(`Key generated: ${data.plaintextCode || data.accessKey}`, 'success');
             loadAccessKeys();
             loadDashboard();
         } else {
-            showToast(data.error || 'Failed to create access key.', 'danger');
+            showToast(data.error || 'Failed to generate key.', 'danger');
         }
     } catch (err) {
         showToast('Error generating access key.', 'danger');
     } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Generate Key';
+        btn.disabled = false;
+        btn.textContent = 'Generate Key';
     }
-}
-
-function showKeyCreatedModal(code, record) {
-    document.getElementById('created-key-code').textContent = code;
-    document.getElementById('created-key-meta').innerHTML = `
-        <div><strong>Name:</strong> ${escapeHtml(record.name)}</div>
-        <div><strong>Type:</strong> ${record.type} (${record.maxUses ? record.maxUses + ' Max Activations' : 'Unlimited Activations'})</div>
-        <div><strong>Expires:</strong> ${record.expiresAtUtc ? formatDate(record.expiresAtUtc) : 'Never'}</div>
-    `;
-    document.getElementById('key-created-modal').classList.remove('hidden');
-}
-
-function closeKeyCreatedModal() {
-    document.getElementById('key-created-modal').classList.add('hidden');
-}
-
-function copyCreatedKey() {
-    const code = document.getElementById('created-key-code').textContent;
-    if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(code).then(() => {
-            showToast('Access key copied to clipboard!', 'success');
-        }).catch(() => fallbackCopyText(code));
-    } else {
-        fallbackCopyText(code);
-    }
-}
-
-function fallbackCopyText(text) {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.top = '0';
-    ta.style.left = '0';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    try {
-        document.execCommand('copy');
-        showToast('Access key copied to clipboard!', 'success');
-    } catch (e) {
-        showToast('Please select and copy the code manually.', 'warning');
-    }
-    document.body.removeChild(ta);
 }
 
 async function disableKey(id) {
@@ -487,84 +412,55 @@ async function enableKey(id) {
     } catch (e) { }
 }
 
-function promptRevokeKey(id, name, useCount) {
-    const bodyHtml = `
-        <p>Are you sure you want to revoke key <strong>${name}</strong>?</p>
-        <p class="mt-2 text-muted">New activations using this key will immediately be rejected.</p>
-        ${useCount > 0 ? `
-            <div class="mt-3 p-3" style="background: rgba(242, 63, 67, 0.1); border-radius: 8px;">
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" id="revoke-associated-clients-chk">
-                    <span style="font-size: 13px; font-weight: 600; color: #ff7b7f;">Also revoke ${useCount} currently enrolled client(s)</span>
-                </label>
-            </div>
-        ` : ''}
-    `;
-
-    showConfirmDialog('Revoke Access Key', bodyHtml, 'Revoke Key', async () => {
-        const chk = document.getElementById('revoke-associated-clients-chk');
-        const revokeClients = chk ? chk.checked : false;
-
+async function promptRevokeKey(id, name) {
+    if (confirm(`Revoke key "${name}" and all associated clients?`)) {
         try {
             const res = await apiFetch(`/api/v1/admin/access-keys/${id}/revoke`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ revokeClients })
+                body: JSON.stringify({ revokeClients: true })
             });
-            const data = await res.json();
             if (res.ok) {
-                showToast(data.message || 'Key revoked.', 'success');
+                showToast('Key revoked.', 'success');
                 loadAccessKeys();
                 loadDashboard();
             }
         } catch (e) { }
-    });
+    }
 }
 
-async function viewKeyUsage(id, name) {
-    const modal = document.getElementById('key-usage-modal');
-    document.getElementById('key-usage-modal-title').textContent = `Activations for "${name}"`;
-    const body = document.getElementById('key-usage-modal-body');
-    body.innerHTML = '<div class="loading-state">Loading activations...</div>';
-    modal.classList.remove('hidden');
-
+async function showKeyUsage(id) {
     try {
         const res = await apiFetch(`/api/v1/admin/access-keys/${id}/usage`);
         const data = await res.json();
+        const modal = document.getElementById('key-usage-modal');
+        const body = document.getElementById('key-usage-modal-body');
+        document.getElementById('key-usage-modal-title').textContent = `Activations for "${data.key.name}"`;
 
-        if (data.clients && data.clients.length > 0) {
+        if (!data.clients || data.clients.length === 0) {
+            body.innerHTML = '<div class="empty-state">No clients have activated using this key yet.</div>';
+        } else {
             body.innerHTML = `
                 <div class="item-list">
                     ${data.clients.map(c => `
                         <div class="list-row">
                             <div class="row-main">
                                 <div class="row-title-line">
-                                    <span class="row-title">${c.clientId}</span>
+                                    <span class="row-title"><code>${escapeHtml(c.clientId)}</code></span>
                                     <span class="badge ${c.isActive ? 'badge-active' : 'badge-revoked'}">${c.isActive ? 'Active' : 'Revoked'}</span>
                                 </div>
                                 <div class="row-meta">
-                                    <span>IP: ${c.registeredIp || 'N/A'}</span>
+                                    <span>IP: ${escapeHtml(c.registeredIp)}</span>
                                     <span>Enrolled: ${formatDate(c.enrolledAtUtc)}</span>
-                                    <span>Last Seen: ${c.lastSeenAtUtc ? formatDate(c.lastSeenAtUtc) : 'Never'}</span>
                                 </div>
-                            </div>
-                            <div class="row-actions">
-                                ${c.isActive ? `
-                                    <button class="btn btn-danger btn-sm" onclick="revokeClient('${c.clientId}', true)">Revoke</button>
-                                ` : `
-                                    <button class="btn btn-secondary btn-sm" onclick="restoreClient('${c.clientId}', true)">Restore</button>
-                                `}
                             </div>
                         </div>
                     `).join('')}
                 </div>
             `;
-        } else {
-            body.innerHTML = '<div class="empty-state">No clients have activated using this key yet.</div>';
         }
-    } catch (e) {
-        body.innerHTML = '<div class="empty-state">Error loading key activations.</div>';
-    }
+        modal.classList.remove('hidden');
+    } catch (e) { }
 }
 
 function closeKeyUsageModal() {
@@ -577,72 +473,60 @@ function closeKeyUsageModal() {
 
 async function loadClients() {
     const container = document.getElementById('clients-container');
+    if (!container) return;
     container.innerHTML = '<div class="loading-state">Loading enrolled clients...</div>';
 
     try {
         const res = await apiFetch('/api/v1/admin/clients');
         currentClientsList = await res.json();
-        renderClients();
+        filterClients();
     } catch (e) {
         container.innerHTML = '<div class="empty-state">Failed to load clients.</div>';
     }
 }
 
-function handleClientSearch() {
-    clientSearchQuery = document.getElementById('client-search-input').value.trim().toLowerCase();
-    renderClients();
-}
-
-function filterClients(mode, btn) {
-    clientFilterMode = mode;
-    document.querySelectorAll('#section-clients .filter-tab').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    renderClients();
-}
-
-function renderClients() {
+function filterClients() {
     const container = document.getElementById('clients-container');
-    let list = currentClientsList;
+    if (!container) return;
 
-    if (clientFilterMode === 'active') {
-        list = list.filter(c => c.isActive);
-    } else if (clientFilterMode === 'revoked') {
-        list = list.filter(c => !c.isActive);
-    }
+    const search = (document.getElementById('client-search')?.value || '').toLowerCase().trim();
+    const status = document.getElementById('client-status-filter')?.value || '';
 
-    if (clientSearchQuery) {
-        list = list.filter(c => 
-            c.clientId.toLowerCase().includes(clientSearchQuery) ||
-            (c.accessKeyName && c.accessKeyName.toLowerCase().includes(clientSearchQuery)) ||
-            (c.registeredIp && c.registeredIp.toLowerCase().includes(clientSearchQuery))
-        );
-    }
+    let filtered = currentClientsList.filter(c => {
+        if (status === 'active' && !c.isActive) return false;
+        if (status === 'revoked' && c.isActive) return false;
+        if (search) {
+            const matchId = c.clientId.toLowerCase().includes(search);
+            const matchIp = (c.registeredIp || '').toLowerCase().includes(search);
+            const matchKey = (c.accessKeyName || '').toLowerCase().includes(search);
+            if (!matchId && !matchIp && !matchKey) return false;
+        }
+        return true;
+    });
 
-    if (list.length === 0) {
-        container.innerHTML = '<div class="empty-state">No clients found matching search/filter.</div>';
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="empty-state">No clients match the current filter.</div>';
         return;
     }
 
     container.innerHTML = `
         <div class="item-list">
-            ${list.map(c => `
+            ${filtered.map(c => `
                 <div class="list-row">
                     <div class="row-main">
                         <div class="row-title-line">
-                            <span class="row-title" style="font-family: monospace;">${c.clientId}</span>
+                            <span class="row-title"><code>${escapeHtml(c.clientId.substring(0, 16))}...</code></span>
                             <span class="badge ${c.isActive ? 'badge-active' : 'badge-revoked'}">${c.isActive ? 'Active' : 'Revoked'}</span>
-                            <span class="badge ${c.accessKeyType === 'GROUP' ? 'badge-group' : 'badge-single'}">${c.accessKeyType || 'Single'}</span>
+                            <span class="badge badge-single">${escapeHtml(c.accessKeyName || 'Direct Ticket')}</span>
                         </div>
                         <div class="row-meta">
-                            <span>Key: <strong>${escapeHtml(c.accessKeyName || 'N/A')}</strong></span>
-                            <span>IP: ${c.registeredIp || 'N/A'}</span>
+                            <span>IP: ${escapeHtml(c.registeredIp)}</span>
                             <span>Enrolled: ${formatDate(c.enrolledAtUtc)}</span>
-                            <span>Last Seen: ${c.lastSeenAtUtc ? formatDate(c.lastSeenAtUtc) : 'Never'}</span>
                         </div>
                     </div>
                     <div class="row-actions">
                         ${c.isActive ? `
-                            <button class="btn btn-danger btn-sm" onclick="promptRevokeClient('${c.clientId}')">Revoke</button>
+                            <button class="btn btn-danger btn-sm" onclick="revokeClient('${c.clientId}')">Revoke</button>
                         ` : `
                             <button class="btn btn-secondary btn-sm" onclick="restoreClient('${c.clientId}')">Restore</button>
                         `}
@@ -653,45 +537,63 @@ function renderClients() {
     `;
 }
 
-function promptRevokeClient(clientId) {
-    showConfirmDialog('Revoke Client', `Are you sure you want to revoke client <code>${clientId}</code>? This device will be denied all VPN access.`, 'Revoke Client', () => revokeClient(clientId));
-}
-
-async function revokeClient(clientId, refreshUsageModal = false) {
+async function revokeClient(clientId) {
     try {
         const res = await apiFetch(`/api/v1/admin/clients/${clientId}/revoke`, { method: 'POST' });
         if (res.ok) {
             showToast('Client revoked.', 'success');
             loadClients();
             loadDashboard();
-            if (refreshUsageModal) closeKeyUsageModal();
         }
     } catch (e) { }
 }
 
-async function restoreClient(clientId, refreshUsageModal = false) {
+async function restoreClient(clientId) {
     try {
         const res = await apiFetch(`/api/v1/admin/clients/${clientId}/restore`, { method: 'POST' });
         if (res.ok) {
             showToast('Client restored.', 'success');
             loadClients();
             loadDashboard();
-            if (refreshUsageModal) closeKeyUsageModal();
         }
     } catch (e) { }
 }
 
 // ==========================================================================
-// SERVERS & WIREGUARD CONFIG IMPORT
+// SERVERS & DUAL-PROTOCOL SUPPORT (WIREGUARD + OPENVPN)
 // ==========================================================================
+
+function switchProtocolTab(protocol) {
+    currentProtocolTab = protocol;
+
+    document.getElementById('tab-btn-wireguard')?.classList.toggle('active', protocol === 'WIREGUARD');
+    document.getElementById('tab-btn-openvpn')?.classList.toggle('active', protocol === 'OPENVPN');
+
+    document.getElementById('wg-toolbar')?.classList.toggle('hidden', protocol !== 'WIREGUARD');
+    document.getElementById('ovpn-toolbar')?.classList.toggle('hidden', protocol !== 'OPENVPN');
+
+    renderServers();
+}
 
 async function loadServers() {
     const container = document.getElementById('servers-container');
+    if (!container) return;
     container.innerHTML = '<div class="loading-state">Loading servers...</div>';
 
     try {
         const res = await apiFetch('/api/v1/admin/servers');
         currentServersList = await res.json();
+
+        // Update protocol count badges
+        const wgCount = currentServersList.filter(s => (s.protocol || '').toUpperCase() === 'WIREGUARD').length;
+        const ovpnCount = currentServersList.filter(s => (s.protocol || '').toUpperCase() === 'OPENVPN').length;
+
+        const wgBadge = document.getElementById('wg-count-badge');
+        if (wgBadge) wgBadge.textContent = wgCount;
+
+        const ovpnBadge = document.getElementById('ovpn-count-badge');
+        if (ovpnBadge) ovpnBadge.textContent = ovpnCount;
+
         renderServers();
     } catch (e) {
         container.innerHTML = '<div class="empty-state">Failed to load servers.</div>';
@@ -700,40 +602,68 @@ async function loadServers() {
 
 function renderServers() {
     const container = document.getElementById('servers-container');
-    if (currentServersList.length === 0) {
-        container.innerHTML = '<div class="empty-state">No servers in catalog registry. Click "Add Server" to import a WireGuard profile.</div>';
+    if (!container) return;
+
+    const filtered = currentServersList.filter(s => {
+        const proto = (s.protocol || 'WIREGUARD').toUpperCase();
+        return proto === currentProtocolTab;
+    });
+
+    if (filtered.length === 0) {
+        const isWg = currentProtocolTab === 'WIREGUARD';
+        container.innerHTML = `
+            <div class="empty-state">
+                No ${isWg ? 'WireGuard (.conf)' : 'OpenVPN (.ovpn)'} servers found in registry.<br>
+                Click <strong>"${isWg ? 'Add WireGuard' : 'Add OpenVPN'}"</strong> above to import.
+            </div>
+        `;
         return;
     }
 
     container.innerHTML = `
         <div class="item-list">
-            ${currentServersList.map(s => `
-                <div class="list-row">
-                    <div class="row-main">
-                        <div class="row-title-line">
-                            <span class="row-title">${escapeHtml(s.name)}</span>
-                            <span class="badge ${s.enabled ? 'badge-active' : 'badge-expired'}">${s.enabled ? 'Enabled' : 'Disabled'}</span>
-                            <span class="badge badge-single">${escapeHtml(s.country || s.region)}</span>
+            ${filtered.map(s => {
+                const isOvpn = (s.protocol || '').toUpperCase() === 'OPENVPN';
+                const provider = s.provider || 'Custom';
+                const providerBadgeClass = provider.toLowerCase().includes('proton') ? 'badge-proton' :
+                                           provider.toLowerCase().includes('vpnbook') ? 'badge-vpnbook' : 'badge-custom';
+
+                return `
+                    <div class="list-row">
+                        <div class="row-main">
+                            <div class="row-title-line">
+                                <span class="row-title">${escapeHtml(s.name)}</span>
+                                <span class="badge ${s.enabled ? 'badge-active' : 'badge-expired'}">${s.enabled ? 'Enabled' : 'Disabled'}</span>
+                                <span class="badge ${isOvpn ? 'badge-warning' : 'badge-accent'}">${isOvpn ? '🔒 OpenVPN' : '⚡ WireGuard'}</span>
+                                <span class="badge ${providerBadgeClass}">${escapeHtml(provider)}</span>
+                                <span class="badge badge-single">${escapeHtml(s.countryCode || s.country || 'Global')}</span>
+                            </div>
+                            <div class="row-meta">
+                                <span>ID: <code>${escapeHtml(s.serverId)}</code></span>
+                                <span>Remote: <strong>${escapeHtml(s.endpoint)}:${s.port}</strong></span>
+                                ${s.city ? `<span>City: ${escapeHtml(s.city)}</span>` : ''}
+                                ${s.credentialSetId ? `<span class="badge badge-credset">Linked Credentials</span>` : ''}
+                                <span>Updated: ${formatDate(s.updatedAtUtc)}</span>
+                            </div>
                         </div>
-                        <div class="row-meta">
-                            <span>ID: <code>${s.serverId}</code></span>
-                            <span>Endpoint: <strong>${s.endpoint}:${s.port}</strong></span>
-                            <span>Updated: ${formatDate(s.updatedAtUtc)}</span>
+                        <div class="row-actions">
+                            ${s.enabled ? `
+                                <button class="btn btn-secondary btn-sm" onclick="disableServer('${s.serverId}')">Disable</button>
+                            ` : `
+                                <button class="btn btn-secondary btn-sm" onclick="enableServer('${s.serverId}')">Enable</button>
+                            `}
+                            <button class="btn btn-danger btn-sm" onclick="promptDeleteServer('${s.serverId}', '${escapeHtml(s.name)}')">Delete</button>
                         </div>
                     </div>
-                    <div class="row-actions">
-                        ${s.enabled ? `
-                            <button class="btn btn-secondary btn-sm" onclick="disableServer('${s.serverId}')">Disable</button>
-                        ` : `
-                            <button class="btn btn-secondary btn-sm" onclick="enableServer('${s.serverId}')">Enable</button>
-                        `}
-                        <button class="btn btn-danger btn-sm" onclick="promptDeleteServer('${s.serverId}', '${escapeHtml(s.name)}')">Delete</button>
-                    </div>
-                </div>
-            `).join('')}
+                `;
+            }).join('')}
         </div>
     `;
 }
+
+// ----------------------------------------------------
+// WIREGUARD SERVER MODAL
+// ----------------------------------------------------
 
 function openAddServerModal() {
     document.getElementById('add-server-modal').classList.remove('hidden');
@@ -774,12 +704,7 @@ async function handleAddServer(e) {
         const res = await apiFetch('/api/v1/admin/servers', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                displayName,
-                country,
-                region,
-                confContent
-            })
+            body: JSON.stringify({ displayName, country, region, confContent })
         });
 
         const data = await res.json();
@@ -792,12 +717,448 @@ async function handleAddServer(e) {
             showToast(data.error || 'Failed to add server.', 'danger');
         }
     } catch (err) {
-        showToast('Error adding server.', 'danger');
+        showToast('Error adding WireGuard server.', 'danger');
     } finally {
         btn.disabled = false;
         btn.textContent = 'Add to Registry';
     }
 }
+
+// ----------------------------------------------------
+// OPENVPN SERVER MODAL
+// ----------------------------------------------------
+
+async function openAddOpenVpnModal() {
+    document.getElementById('add-openvpn-modal').classList.remove('hidden');
+    document.getElementById('ovpn-display-name').value = '';
+    document.getElementById('ovpn-country').value = '';
+    document.getElementById('ovpn-country-code').value = '';
+    document.getElementById('ovpn-city').value = '';
+    document.getElementById('ovpn-provider').value = 'Custom';
+    document.getElementById('ovpn-file-text').value = '';
+    document.getElementById('ovpn-validation-box').classList.add('hidden');
+    document.getElementById('ovpn-inline-creds').classList.add('hidden');
+
+    await populateCredentialSetsDropdown('ovpn-credential-set');
+}
+
+function closeAddOpenVpnModal() {
+    document.getElementById('add-openvpn-modal').classList.add('hidden');
+}
+
+function handleProviderChange() {
+    const provider = document.getElementById('ovpn-provider').value;
+    validateOvpnLive();
+}
+
+function toggleInlineCredentials() {
+    const setVal = document.getElementById('ovpn-credential-set').value;
+    const inlineBox = document.getElementById('ovpn-inline-creds');
+    // If "none", allow inline credentials
+    inlineBox.classList.toggle('hidden', setVal !== '');
+}
+
+function handleOvpnFileSelect(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Auto infer display name & country from filename (e.g. "ar.protonvpn.udp.ovpn")
+    const fname = file.name.replace(/\.ovpn$/i, '');
+    const parts = fname.split(/[\.-]/);
+
+    if (parts.length > 0) {
+        const code = parts[0].toUpperCase();
+        if (code.length === 2) {
+            document.getElementById('ovpn-country-code').value = code;
+        }
+    }
+
+    if (fname.toLowerCase().includes('proton')) {
+        document.getElementById('ovpn-provider').value = 'Proton';
+    } else if (fname.toLowerCase().includes('vpnbook')) {
+        document.getElementById('ovpn-provider').value = 'VPNBook';
+    }
+
+    if (!document.getElementById('ovpn-display-name').value) {
+        document.getElementById('ovpn-display-name').value = fname;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        document.getElementById('ovpn-file-text').value = event.target.result;
+        validateOvpnLive();
+    };
+    reader.readAsText(file);
+}
+
+function validateOvpnLive() {
+    clearTimeout(validationDebounceTimer);
+    validationDebounceTimer = setTimeout(async () => {
+        const text = document.getElementById('ovpn-file-text')?.value.trim();
+        const box = document.getElementById('ovpn-validation-box');
+        const grid = document.getElementById('val-grid');
+        const title = document.getElementById('val-status-title');
+        const errMsg = document.getElementById('val-error-msg');
+
+        if (!text || text.length < 10) {
+            box?.classList.add('hidden');
+            return;
+        }
+
+        const provider = document.getElementById('ovpn-provider')?.value || 'Custom';
+
+        try {
+            const res = await apiFetch('/api/v1/admin/openvpn/validate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ovpnContent: text, provider })
+            });
+
+            const val = await res.json();
+            box.classList.remove('hidden');
+
+            if (val.isValid) {
+                box.className = 'validation-preview valid';
+                title.innerHTML = '<span>✅</span> Safe OpenVPN Profile Validated';
+                errMsg.classList.add('hidden');
+                grid.innerHTML = `
+                    <div class="val-item">
+                        <div class="val-label">Protocol</div>
+                        <div class="val-value"><span class="badge ${val.protocol === 'UDP' ? 'badge-udp' : 'badge-tcp'}">${val.protocol}</span></div>
+                    </div>
+                    <div class="val-item">
+                        <div class="val-label">Primary Remote</div>
+                        <div class="val-value">${escapeHtml(val.primaryRemote || 'N/A')}</div>
+                    </div>
+                    <div class="val-item">
+                        <div class="val-label">Auth Type</div>
+                        <div class="val-value">${escapeHtml(val.authType)}</div>
+                    </div>
+                    <div class="val-item">
+                        <div class="val-label">Directives</div>
+                        <div class="val-value text-success">Allowlist Clean</div>
+                    </div>
+                `;
+            } else {
+                box.className = 'validation-preview invalid';
+                title.innerHTML = '<span>❌</span> Configuration Rejected';
+                errMsg.textContent = val.error || 'Rejected by security policy.';
+                errMsg.classList.remove('hidden');
+                grid.innerHTML = '';
+            }
+        } catch { }
+    }, 250);
+}
+
+async function handleAddOpenVpnServer(e) {
+    e.preventDefault();
+    const btn = document.getElementById('submit-add-ovpn-btn');
+    btn.disabled = true;
+    btn.textContent = 'Validating & Importing...';
+
+    const displayName = document.getElementById('ovpn-display-name').value.trim();
+    const country = document.getElementById('ovpn-country').value.trim();
+    const countryCode = document.getElementById('ovpn-country-code').value.trim();
+    const city = document.getElementById('ovpn-city').value.trim();
+    const provider = document.getElementById('ovpn-provider').value;
+    const credentialSetId = document.getElementById('ovpn-credential-set').value || null;
+    const username = document.getElementById('ovpn-username')?.value.trim() || null;
+    const password = document.getElementById('ovpn-password')?.value.trim() || null;
+    const ovpnContent = document.getElementById('ovpn-file-text').value.trim();
+
+    try {
+        const res = await apiFetch('/api/v1/admin/servers/openvpn', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                displayName,
+                country,
+                countryCode,
+                region: country,
+                city,
+                provider,
+                credentialSetId,
+                username,
+                password,
+                ovpnContent
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+            closeAddOpenVpnModal();
+            showToast(data.message, 'success');
+            currentProtocolTab = 'OPENVPN';
+            switchProtocolTab('OPENVPN');
+            loadServers();
+            loadDashboard();
+        } else {
+            showToast(data.error || 'Failed to import OpenVPN profile.', 'danger');
+        }
+    } catch (err) {
+        showToast('Error importing OpenVPN server.', 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Import OpenVPN Server';
+    }
+}
+
+// ----------------------------------------------------
+// BULK OPENVPN IMPORT MODAL
+// ----------------------------------------------------
+
+async function openBulkOpenVpnModal() {
+    document.getElementById('bulk-openvpn-modal').classList.remove('hidden');
+    document.getElementById('bulk-preview-container').classList.add('hidden');
+    bulkFilesToImport = [];
+    await populateCredentialSetsDropdown('bulk-cred-set');
+}
+
+function closeBulkOpenVpnModal() {
+    document.getElementById('bulk-openvpn-modal').classList.add('hidden');
+}
+
+function handleBulkFilesSelect(e) {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+
+    bulkFilesToImport = [];
+    const previewContainer = document.getElementById('bulk-preview-container');
+    const listEl = document.getElementById('bulk-files-list');
+    document.getElementById('bulk-files-count').textContent = files.length;
+    previewContainer.classList.remove('hidden');
+    listEl.innerHTML = '<div class="loading-state">Reading profiles...</div>';
+
+    let readCount = 0;
+    files.forEach(f => {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            bulkFilesToImport.push({
+                filename: f.name,
+                content: evt.target.result
+            });
+            readCount++;
+            if (readCount === files.length) {
+                renderBulkPreview();
+            }
+        };
+        reader.readAsText(f);
+    });
+}
+
+function renderBulkPreview() {
+    const listEl = document.getElementById('bulk-files-list');
+    listEl.innerHTML = `
+        <div class="item-list">
+            ${bulkFilesToImport.map((f, i) => `
+                <div class="list-row" style="padding: 6px 10px;">
+                    <div class="row-main">
+                        <span class="row-title" style="font-size: 13px;">📄 ${escapeHtml(f.filename)}</span>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+async function handleBulkImportOpenVpn(e) {
+    e.preventDefault();
+    if (!bulkFilesToImport.length) {
+        showToast('Please select at least one .ovpn file.', 'danger');
+        return;
+    }
+
+    const btn = document.getElementById('submit-bulk-ovpn-btn');
+    btn.disabled = true;
+    btn.textContent = `Importing ${bulkFilesToImport.length} Profiles...`;
+
+    const provider = document.getElementById('bulk-provider').value;
+    const credSetId = document.getElementById('bulk-cred-set').value || null;
+
+    const payloadServers = bulkFilesToImport.map(f => {
+        const name = f.filename.replace(/\.ovpn$/i, '');
+        const code = name.substring(0, 2).toUpperCase();
+        return {
+            displayName: name,
+            country: code,
+            countryCode: code,
+            region: code,
+            provider: provider,
+            credentialSetId: credSetId,
+            ovpnContent: f.content
+        };
+    });
+
+    try {
+        const res = await apiFetch('/api/v1/admin/servers/openvpn/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ servers: payloadServers })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+            closeBulkOpenVpnModal();
+            showToast(data.message, 'success');
+            currentProtocolTab = 'OPENVPN';
+            switchProtocolTab('OPENVPN');
+            loadServers();
+            loadDashboard();
+        } else {
+            showToast(data.error || 'Bulk import failed.', 'danger');
+        }
+    } catch {
+        showToast('Error during bulk import.', 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Import All Profiles';
+    }
+}
+
+// ----------------------------------------------------
+// CREDENTIAL SETS MANAGEMENT MODAL
+// ----------------------------------------------------
+
+async function openCredentialSetsModal() {
+    document.getElementById('credential-sets-modal').classList.remove('hidden');
+    document.getElementById('cred-set-editor').classList.add('hidden');
+    await loadCredentialSets();
+}
+
+function closeCredentialSetsModal() {
+    document.getElementById('credential-sets-modal').classList.add('hidden');
+}
+
+async function loadCredentialSets() {
+    const container = document.getElementById('cred-sets-list-container');
+    container.innerHTML = '<div class="loading-state">Loading credential sets...</div>';
+
+    try {
+        const res = await apiFetch('/api/v1/admin/openvpn/credential-sets');
+        currentCredentialSetsList = await res.json();
+        renderCredentialSets();
+    } catch {
+        container.innerHTML = '<div class="empty-state">Failed to load credential sets.</div>';
+    }
+}
+
+function renderCredentialSets() {
+    const container = document.getElementById('cred-sets-list-container');
+    if (currentCredentialSetsList.length === 0) {
+        container.innerHTML = '<div class="empty-state">No credential sets created yet. Click "New Credential Set" to add one.</div>';
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="item-list">
+            ${currentCredentialSetsList.map(c => `
+                <div class="cred-set-card">
+                    <div class="cred-set-info">
+                        <div class="cred-set-title">
+                            <span>🔑 ${escapeHtml(c.name)}</span>
+                            <span class="badge badge-proton">${escapeHtml(c.provider)}</span>
+                        </div>
+                        <div class="cred-set-meta">
+                            <span>User: <strong>${escapeHtml(c.username)}</strong></span>
+                            <span>Pass: <code>••••••••</code> (AES-GCM)</span>
+                            <span>Updated: ${formatDate(c.updatedAtUtc)}</span>
+                        </div>
+                    </div>
+                    <div class="row-actions">
+                        <button class="btn btn-secondary btn-sm" onclick="openEditCredSetForm('${c.id}')">Rotate / Edit</button>
+                        <button class="btn btn-danger btn-sm" onclick="promptDeleteCredSet('${c.id}', '${escapeHtml(c.name)}')">Delete</button>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function openCreateCredSetForm() {
+    document.getElementById('cred-set-editor').classList.remove('hidden');
+    document.getElementById('cred-set-editor-title').textContent = 'New Reusable Credential Set';
+    document.getElementById('cred-set-edit-id').value = '';
+    document.getElementById('cred-set-name').value = '';
+    document.getElementById('cred-set-username').value = '';
+    document.getElementById('cred-set-password').value = '';
+}
+
+function openEditCredSetForm(id) {
+    const set = currentCredentialSetsList.find(c => c.id === id);
+    if (!set) return;
+
+    document.getElementById('cred-set-editor').classList.remove('hidden');
+    document.getElementById('cred-set-editor-title').textContent = `Rotate Credentials — "${set.name}"`;
+    document.getElementById('cred-set-edit-id').value = set.id;
+    document.getElementById('cred-set-name').value = set.name;
+    document.getElementById('cred-set-provider').value = set.provider;
+    document.getElementById('cred-set-username').value = set.username;
+    document.getElementById('cred-set-password').value = '';
+}
+
+function closeCredSetForm() {
+    document.getElementById('cred-set-editor').classList.add('hidden');
+}
+
+async function handleSaveCredSet(e) {
+    e.preventDefault();
+    const id = document.getElementById('cred-set-edit-id').value;
+    const name = document.getElementById('cred-set-name').value.trim();
+    const provider = document.getElementById('cred-set-provider').value;
+    const username = document.getElementById('cred-set-username').value.trim();
+    const password = document.getElementById('cred-set-password').value.trim();
+
+    const isEdit = id !== '';
+    const url = isEdit ? `/api/v1/admin/openvpn/credential-sets/${id}` : '/api/v1/admin/openvpn/credential-sets';
+    const method = isEdit ? 'PUT' : 'POST';
+
+    try {
+        const res = await apiFetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, provider, username, password: password || undefined })
+        });
+
+        if (res.ok) {
+            showToast(isEdit ? 'Credential set updated (password rotated).' : 'Credential set created.', 'success');
+            closeCredSetForm();
+            loadCredentialSets();
+        } else {
+            const data = await res.json();
+            showToast(data.error || 'Failed to save credential set.', 'danger');
+        }
+    } catch {
+        showToast('Error saving credential set.', 'danger');
+    }
+}
+
+async function promptDeleteCredSet(id, name) {
+    if (confirm(`Delete credential set "${name}"?`)) {
+        try {
+            const res = await apiFetch(`/api/v1/admin/openvpn/credential-sets/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                showToast('Credential set deleted.', 'success');
+                loadCredentialSets();
+            }
+        } catch { }
+    }
+}
+
+async function populateCredentialSetsDropdown(selectElementId) {
+    const el = document.getElementById(selectElementId);
+    if (!el) return;
+
+    try {
+        const res = await apiFetch('/api/v1/admin/openvpn/credential-sets');
+        const sets = await res.json();
+        el.innerHTML = '<option value="">None / Inline Certificate Only</option>' +
+            sets.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${escapeHtml(s.provider)} - ${escapeHtml(s.username)})</option>`).join('');
+    } catch { }
+}
+
+// ----------------------------------------------------
+// SERVER OPERATIONS
+// ----------------------------------------------------
 
 async function enableServer(id) {
     try {
@@ -806,7 +1167,7 @@ async function enableServer(id) {
             showToast('Server enabled.', 'success');
             loadServers();
         }
-    } catch (e) { }
+    } catch { }
 }
 
 async function disableServer(id) {
@@ -816,19 +1177,18 @@ async function disableServer(id) {
             showToast('Server disabled.', 'success');
             loadServers();
         }
-    } catch (e) { }
+    } catch { }
 }
 
 function promptDeleteServer(id, name) {
-    showConfirmDialog('Delete Server', `Are you sure you want to remove server <strong>${name}</strong> from catalog registry?`, 'Delete Server', async () => {
-        try {
-            const res = await apiFetch(`/api/v1/admin/servers/${id}`, { method: 'DELETE' });
+    if (confirm(`Delete server "${name}" from catalog registry?`)) {
+        apiFetch(`/api/v1/admin/servers/${id}`, { method: 'DELETE' }).then(res => {
             if (res.ok) {
-                showToast('Server removed.', 'success');
+                showToast('Server deleted.', 'success');
                 loadServers();
             }
-        } catch (e) { }
-    });
+        });
+    }
 }
 
 // ==========================================================================
@@ -837,14 +1197,15 @@ function promptDeleteServer(id, name) {
 
 async function loadGenerations() {
     const container = document.getElementById('generations-container');
-    container.innerHTML = '<div class="loading-state">Loading generation history...</div>';
+    if (!container) return;
+    container.innerHTML = '<div class="loading-state">Loading generations...</div>';
 
     try {
         const res = await apiFetch('/api/v1/admin/generations');
         const list = await res.json();
 
         if (list.length === 0) {
-            container.innerHTML = '<div class="empty-state">No signed generations created yet.</div>';
+            container.innerHTML = '<div class="empty-state">No signed catalog generations found.</div>';
             return;
         }
 
@@ -854,18 +1215,20 @@ async function loadGenerations() {
                     <div class="list-row">
                         <div class="row-main">
                             <div class="row-title-line">
-                                <span class="row-title">Generation ${g.generation}</span>
-                                <span class="badge ${g.isActive ? 'badge-active' : 'badge-expired'}">${g.isActive ? 'Active Catalog' : 'Archived'}</span>
+                                <span class="row-title">Generation #${g.generation}</span>
+                                <span class="badge ${g.isActive ? 'badge-active' : 'badge-expired'}">${g.isActive ? 'Active Generation' : 'Archived'}</span>
+                                <span class="badge badge-accent">Total: ${g.serverCount}</span>
+                                <span class="badge badge-single">WG: ${g.wireguardCount || 0}</span>
+                                <span class="badge badge-warning">OVPN: ${g.openVpnCount || 0}</span>
                             </div>
                             <div class="row-meta">
-                                <span>Published: <strong>${formatDate(g.publishedAtUtc)}</strong></span>
-                                <span>Published By: ${escapeHtml(g.publishedBy)}</span>
-                                <span>Servers: <strong>${g.serverCount}</strong></span>
+                                <span>Published: ${formatDate(g.publishedAtUtc)}</span>
+                                <span>By: ${escapeHtml(g.publishedBy || 'System')}</span>
                             </div>
                         </div>
                         <div class="row-actions">
                             ${!g.isActive ? `
-                                <button class="btn btn-secondary btn-sm" onclick="promptSwitchGeneration(${g.generation})">Switch to Gen ${g.generation}</button>
+                                <button class="btn btn-secondary btn-sm" onclick="rollbackToGeneration(${g.generation})">Activate / Rollback</button>
                             ` : ''}
                         </div>
                     </div>
@@ -873,54 +1236,49 @@ async function loadGenerations() {
             </div>
         `;
     } catch (e) {
-        container.innerHTML = '<div class="empty-state">Failed to load generation history.</div>';
+        container.innerHTML = '<div class="empty-state">Failed to load generations.</div>';
     }
 }
 
-function handleCompileAndPublishGeneration() {
-    showConfirmDialog(
-        'Compile & Publish Generation',
-        '<p>This will compile all enabled servers from the registry, cryptographically sign the catalog manifest, and make it the active production generation for all clients.</p><p class="mt-2 text-muted">Are you ready to publish?</p>',
-        'Publish Generation',
-        async () => {
-            try {
-                const res = await apiFetch('/api/v1/admin/generations', { method: 'POST' });
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    showToast(data.message, 'success');
-                    loadGenerations();
-                    loadDashboard();
-                } else {
-                    showToast(data.error || 'Failed to publish generation.', 'danger');
-                }
-            } catch (e) {
-                showToast('Error publishing generation.', 'danger');
-            }
-        },
-        false // not danger, primary accent
-    );
+async function handleCompileAndPublishGeneration() {
+    if (!confirm('Compile and publish a new signed catalog generation now? All active clients will receive this generation on next check-in.')) return;
+
+    try {
+        const res = await apiFetch('/api/v1/admin/generations', { method: 'POST' });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast(data.message, 'success');
+            loadGenerations();
+            loadDashboard();
+        } else {
+            showToast(data.error || 'Generation compile failed.', 'danger');
+        }
+    } catch {
+        showToast('Error publishing generation.', 'danger');
+    }
 }
 
-function promptSwitchGeneration(genNumber) {
-    showConfirmDialog('Switch Active Generation', `Switch active production catalog generation to <strong>Generation ${genNumber}</strong>?`, 'Switch Generation', async () => {
-        try {
-            const res = await apiFetch(`/api/v1/admin/generations/${genNumber}/publish`, { method: 'POST' });
-            const data = await res.json();
-            if (res.ok && data.success) {
-                showToast(data.message, 'success');
-                loadGenerations();
-                loadDashboard();
-            }
-        } catch (e) { }
-    });
+async function rollbackToGeneration(genNumber) {
+    if (!confirm(`Switch active catalog generation to #${genNumber}?`)) return;
+
+    try {
+        const res = await apiFetch(`/api/v1/admin/generations/${genNumber}/publish`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast(data.message, 'success');
+            loadGenerations();
+            loadDashboard();
+        }
+    } catch { }
 }
 
 // ==========================================================================
-// AUDIT LOG
+// AUDIT LOG & SYSTEM INFO
 // ==========================================================================
 
 async function loadAuditLog() {
     const container = document.getElementById('audit-container');
+    if (!container) return;
     container.innerHTML = '<div class="loading-state">Loading audit events...</div>';
 
     try {
@@ -928,7 +1286,7 @@ async function loadAuditLog() {
         const list = await res.json();
 
         if (list.length === 0) {
-            container.innerHTML = '<div class="empty-state">No audit log records found.</div>';
+            container.innerHTML = '<div class="empty-state">No audit events recorded yet.</div>';
             return;
         }
 
@@ -938,14 +1296,13 @@ async function loadAuditLog() {
                     <div class="list-row">
                         <div class="row-main">
                             <div class="row-title-line">
-                                <span class="row-title">${formatActionName(a.action)}</span>
-                                <span class="badge badge-single">${a.actor}</span>
-                                ${a.targetId ? `<span class="badge badge-expired">Target: ${escapeHtml(a.targetId)}</span>` : ''}
+                                <span class="row-title">${escapeHtml(a.action)}</span>
+                                <span class="badge badge-single">${escapeHtml(a.actor)}</span>
+                                ${a.targetId ? `<span>Target: <code>${escapeHtml(a.targetId)}</code></span>` : ''}
                             </div>
                             <div class="row-meta">
                                 <span>${formatDate(a.timestampUtc)}</span>
-                                <span>IP: ${a.clientIp}</span>
-                                ${formatMetadata(a.metadata)}
+                                <span>IP: ${escapeHtml(a.clientIp)}</span>
                             </div>
                         </div>
                     </div>
@@ -957,62 +1314,40 @@ async function loadAuditLog() {
     }
 }
 
-// ==========================================================================
-// SYSTEM INFO
-// ==========================================================================
-
 async function loadSystemInfo() {
     const container = document.getElementById('system-container');
-    container.innerHTML = '<div class="loading-state">Loading system health...</div>';
+    if (!container) return;
+    container.innerHTML = '<div class="loading-state">Loading system info...</div>';
 
     try {
-        const res = await apiFetch('/api/v1/admin/system');
+        const res = await apiFetch('/api/v1/admin/system/info');
         const data = await res.json();
 
         container.innerHTML = `
-            <div class="system-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px;">
-                <div class="stat-card">
-                    <div class="stat-data">
-                        <span class="stat-value" style="color: var(--accent-success);">${data.health}</span>
-                        <span class="stat-label">Backend Health</span>
-                    </div>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-value text-success">Healthy</div>
+                    <div class="metric-label">Service Health</div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-data">
-                        <span class="stat-value">${data.environment}</span>
-                        <span class="stat-label">Deployment Environment</span>
-                    </div>
+                <div class="metric-card">
+                    <div class="metric-value">${(data.uptimeSeconds / 3600).toFixed(1)}h</div>
+                    <div class="metric-label">Backend Uptime</div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-data">
-                        <span class="stat-value">Gen ${data.activeGeneration}</span>
-                        <span class="stat-label">Active Catalog Generation</span>
-                    </div>
+                <div class="metric-card">
+                    <div class="metric-value">${(data.memoryBytes / (1024 * 1024)).toFixed(1)} MB</div>
+                    <div class="metric-label">Memory Usage</div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-data">
-                        <span class="stat-value">${data.enabledServersCount} / ${data.totalServersCount}</span>
-                        <span class="stat-label">Servers (Enabled / Total)</span>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-data">
-                        <span class="stat-value">${data.activeClientsCount} / ${data.totalClientsCount}</span>
-                        <span class="stat-label">Enrolled Clients (Active / Total)</span>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-data">
-                        <span class="stat-value">${data.activeAccessKeysCount} / ${data.totalAccessKeysCount}</span>
-                        <span class="stat-label">Access Keys (Active / Total)</span>
-                    </div>
+                <div class="metric-card">
+                    <div class="metric-value">${data.processorCount} Cores</div>
+                    <div class="metric-label">CPU Cores</div>
                 </div>
             </div>
-
-            <div class="mt-4 p-3" style="background: var(--bg-card); border-radius: 8px; border: 1px solid var(--border-color); font-size: 12px; color: var(--text-secondary);">
-                <div><strong>Runtime:</strong> ${data.framework}</div>
-                <div><strong>Storage:</strong> ${data.storage}</div>
-                <div><strong>Server Time:</strong> ${formatDate(data.serverTimeUtc)}</div>
+            <div class="card mt-3 p-3">
+                <div class="row-meta" style="flex-direction: column; align-items: flex-start; gap: 6px;">
+                    <div><strong>OS:</strong> ${escapeHtml(data.osVersion)} (${data.is64Bit ? '64-bit' : '32-bit'})</div>
+                    <div><strong>Runtime:</strong> .NET ${escapeHtml(data.runtime)}</div>
+                    <div><strong>Host Machine:</strong> ${escapeHtml(data.machineName)}</div>
+                </div>
             </div>
         `;
     } catch (e) {
@@ -1020,47 +1355,40 @@ async function loadSystemInfo() {
     }
 }
 
-// ==========================================================================
-// Formatting Helpers
-// ==========================================================================
+// ----------------------------------------------------
+// DRAG & DROP SETUP
+// ----------------------------------------------------
 
-function formatDate(isoStr) {
-    if (!isoStr) return 'N/A';
-    try {
-        const d = new Date(isoStr);
-        return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch (e) {
-        return isoStr;
-    }
-}
+function setupDragAndDrop() {
+    ['ovpn-dropzone', 'bulk-dropzone'].forEach(id => {
+        const dropzone = document.getElementById(id);
+        if (!dropzone) return;
 
-function formatActionName(action) {
-    return action.replace(/([A-Z])/g, ' $1').trim();
-}
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            }, false);
+        });
 
-function formatMetadata(meta) {
-    if (!meta || Object.keys(meta).length === 0) return '';
-    return Object.entries(meta).map(([k, v]) => `<span>${k}: <strong>${escapeHtml(v)}</strong></span>`).join(' ');
-}
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropzone.addEventListener(eventName, () => dropzone.classList.add('dragover'), false);
+        });
 
-function getStatusBadgeClass(status) {
-    switch (status) {
-        case 'Active': return 'badge-active';
-        case 'Revoked': return 'badge-revoked';
-        case 'Disabled': return 'badge-expired';
-        case 'Expired': return 'badge-expired';
-        case 'Consumed': return 'badge-consumed';
-        case 'Capacity Reached': return 'badge-consumed';
-        default: return 'badge-single';
-    }
-}
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropzone.addEventListener(eventName, () => dropzone.classList.remove('dragover'), false);
+        });
 
-function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+        dropzone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (id === 'ovpn-dropzone' && files.length > 0) {
+                const fakeEvent = { target: { files: [files[0]] } };
+                handleOvpnFileSelect(fakeEvent);
+            } else if (id === 'bulk-dropzone' && files.length > 0) {
+                const fakeEvent = { target: { files: files } };
+                handleBulkFilesSelect(fakeEvent);
+            }
+        }, false);
+    });
 }

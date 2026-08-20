@@ -2,6 +2,24 @@ using System.Text.Json.Serialization;
 
 namespace DCScreenSharing.Core.Profiles;
 
+public static class VpnProtocol
+{
+    public const string WireGuard = "WIREGUARD";
+    public const string OpenVpn = "OPENVPN";
+
+    public static bool IsOpenVpn(string? protocol) =>
+        string.Equals(protocol, OpenVpn, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(protocol, "openvpn", StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsWireGuard(string? protocol) =>
+        string.IsNullOrEmpty(protocol) ||
+        string.Equals(protocol, WireGuard, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(protocol, "wireguard", StringComparison.OrdinalIgnoreCase);
+
+    public static string Normalize(string? protocol) =>
+        IsOpenVpn(protocol) ? OpenVpn : WireGuard;
+}
+
 public class ServerEntry
 {
     [JsonPropertyName("id")]
@@ -12,6 +30,21 @@ public class ServerEntry
 
     [JsonPropertyName("region")]
     public string Region { get; set; } = string.Empty;
+
+    [JsonPropertyName("country")]
+    public string Country { get; set; } = string.Empty;
+
+    [JsonPropertyName("countryCode")]
+    public string CountryCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("city")]
+    public string? City { get; set; }
+
+    [JsonPropertyName("provider")]
+    public string Provider { get; set; } = "Custom";
+
+    [JsonPropertyName("protocol")]
+    public string Protocol { get; set; } = VpnProtocol.WireGuard;
 
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
@@ -110,6 +143,114 @@ public class WireGuardProfileConfig
     public int PersistentKeepalive { get; set; } = 25;
 }
 
+public class OpenVpnRemoteEndpoint
+{
+    [JsonPropertyName("host")]
+    public string Host { get; set; } = string.Empty;
+
+    [JsonPropertyName("port")]
+    public int Port { get; set; } = 1194;
+
+    [JsonPropertyName("proto")]
+    public string Proto { get; set; } = "udp"; // "udp", "tcp", "udp4", "udp6", "tcp4", "tcp6"
+}
+
+public class OpenVpnProfileConfig
+{
+    [JsonPropertyName("remoteEndpoints")]
+    public List<OpenVpnRemoteEndpoint> RemoteEndpoints { get; set; } = new();
+
+    [JsonPropertyName("protocol")]
+    public string Protocol { get; set; } = "udp"; // "udp" or "tcp"
+
+    [JsonPropertyName("device")]
+    public string Device { get; set; } = "tun";
+
+    [JsonPropertyName("cipher")]
+    public string Cipher { get; set; } = string.Empty;
+
+    [JsonPropertyName("dataCiphers")]
+    public string DataCiphers { get; set; } = string.Empty;
+
+    [JsonPropertyName("dataCiphersFallback")]
+    public string DataCiphersFallback { get; set; } = string.Empty;
+
+    [JsonPropertyName("auth")]
+    public string Auth { get; set; } = string.Empty;
+
+    [JsonPropertyName("caCert")]
+    public string CaCert { get; set; } = string.Empty;
+
+    [JsonPropertyName("clientCert")]
+    public string ClientCert { get; set; } = string.Empty;
+
+    [JsonPropertyName("clientKey")]
+    public string ClientKey { get; set; } = string.Empty; // Highly sensitive
+
+    [JsonPropertyName("tlsAuthKey")]
+    public string TlsAuthKey { get; set; } = string.Empty;
+
+    [JsonPropertyName("tlsCryptKey")]
+    public string TlsCryptKey { get; set; } = string.Empty;
+
+    [JsonPropertyName("tlsCryptV2Key")]
+    public string TlsCryptV2Key { get; set; } = string.Empty;
+
+    [JsonPropertyName("keyDirection")]
+    public string? KeyDirection { get; set; }
+
+    [JsonPropertyName("authUserPass")]
+    public bool AuthUserPass { get; set; }
+
+    [JsonPropertyName("credentialSetId")]
+    public string? CredentialSetId { get; set; }
+
+    [JsonPropertyName("username")]
+    public string? Username { get; set; }
+
+    [JsonPropertyName("encryptedPassword")]
+    public string? EncryptedPassword { get; set; }
+
+    [JsonPropertyName("remoteCertTls")]
+    public string? RemoteCertTls { get; set; } = "server";
+
+    [JsonPropertyName("resolvRetry")]
+    public string? ResolvRetry { get; set; } = "infinite";
+
+    [JsonPropertyName("nobind")]
+    public bool Nobind { get; set; } = true;
+
+    [JsonPropertyName("persistKey")]
+    public bool PersistKey { get; set; } = true;
+
+    [JsonPropertyName("persistTun")]
+    public bool PersistTun { get; set; } = true;
+
+    [JsonPropertyName("tunMtu")]
+    public int? TunMtu { get; set; }
+
+    [JsonPropertyName("mssfix")]
+    public int? Mssfix { get; set; }
+
+    [JsonPropertyName("verb")]
+    public int Verb { get; set; } = 3;
+
+    [JsonPropertyName("connectRetry")]
+    public int? ConnectRetry { get; set; }
+
+    [JsonPropertyName("connectTimeout")]
+    public int? ConnectTimeout { get; set; }
+
+    [JsonPropertyName("compress")]
+    public string? Compress { get; set; }
+
+    [JsonPropertyName("safeDirectives")]
+    public Dictionary<string, string> SafeDirectives { get; set; } = new();
+
+    [JsonPropertyName("rawConfigSafe")]
+    public string RawConfigSafe { get; set; } = string.Empty;
+}
+
 public class ServerProfile
 {
     [JsonPropertyName("profileId")]
@@ -117,6 +258,9 @@ public class ServerProfile
 
     [JsonPropertyName("serverId")]
     public string ServerId { get; set; } = string.Empty;
+
+    [JsonPropertyName("protocol")]
+    public string Protocol { get; set; } = VpnProtocol.WireGuard;
 
     [JsonPropertyName("generation")]
     public int Generation { get; set; } = 1;
@@ -132,6 +276,9 @@ public class ServerProfile
 
     [JsonPropertyName("wireguard")]
     public WireGuardProfileConfig Wireguard { get; set; } = new();
+
+    [JsonPropertyName("openvpn")]
+    public OpenVpnProfileConfig? Openvpn { get; set; }
 }
 
 public class SignedManifest

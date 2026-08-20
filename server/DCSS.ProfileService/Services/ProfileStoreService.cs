@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using DCScreenSharing.Core.Profiles;
 using DCScreenSharing.Shared.Logging;
@@ -8,29 +9,79 @@ namespace DCSS.ProfileService.Services;
 
 public class GenerationRecord
 {
+    [JsonPropertyName("generation")]
     public int Generation { get; set; }
+
+    [JsonPropertyName("publishedAtUtc")]
     public DateTime PublishedAtUtc { get; set; }
+
+    [JsonPropertyName("publishedBy")]
     public string PublishedBy { get; set; } = "Maintainer";
+
+    [JsonPropertyName("serverCount")]
     public int ServerCount { get; set; }
+
+    [JsonPropertyName("wireguardCount")]
+    public int WireGuardCount { get; set; }
+
+    [JsonPropertyName("openvpnCount")]
+    public int OpenVpnCount { get; set; }
+
+    [JsonPropertyName("isActive")]
     public bool IsActive { get; set; }
 }
 
 public class ActiveGenerationPointer
 {
+    [JsonPropertyName("activeGeneration")]
     public int ActiveGeneration { get; set; }
+
+    [JsonPropertyName("updatedAtUtc")]
     public DateTime UpdatedAtUtc { get; set; }
 }
 
 public class ServerRegistryItem
 {
+    [JsonPropertyName("serverId")]
     public string ServerId { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("country")]
     public string Country { get; set; } = string.Empty;
+
+    [JsonPropertyName("countryCode")]
+    public string CountryCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("region")]
     public string Region { get; set; } = string.Empty;
+
+    [JsonPropertyName("city")]
+    public string? City { get; set; }
+
+    [JsonPropertyName("provider")]
+    public string Provider { get; set; } = "Custom";
+
+    [JsonPropertyName("protocol")]
+    public string Protocol { get; set; } = VpnProtocol.WireGuard;
+
+    [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
+
+    [JsonPropertyName("endpoint")]
     public string Endpoint { get; set; } = string.Empty;
+
+    [JsonPropertyName("port")]
     public int Port { get; set; } = 51820;
+
+    [JsonPropertyName("credentialSetId")]
+    public string? CredentialSetId { get; set; }
+
+    [JsonPropertyName("createdAtUtc")]
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    [JsonPropertyName("updatedAtUtc")]
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
@@ -40,12 +91,14 @@ public class ProfileStoreService
     private readonly string _registryPath;
     private readonly string _profilesStorageDir;
     private readonly IAppLogger _logger;
+    private readonly CredentialSetService? _credentialSetService;
     private readonly ConcurrentDictionary<string, (ServerRegistryItem Meta, ServerProfile Profile)> _serverRegistry = new();
     private readonly object _lock = new();
 
-    public ProfileStoreService(IConfiguration config, IAppLogger? logger = null)
+    public ProfileStoreService(IConfiguration config, CredentialSetService? credentialSetService = null, IAppLogger? logger = null)
     {
         _logger = logger ?? new FileLogger(Path.GetTempPath(), "profileservice.log");
+        _credentialSetService = credentialSetService;
         var configuredPath = config["ProfileService:StoragePath"];
         _storageDirectory = !string.IsNullOrEmpty(configuredPath)
             ? Path.GetFullPath(configuredPath)
@@ -57,14 +110,25 @@ public class ProfileStoreService
         InitializeStorage();
     }
 
-    public ProfileStoreService(string storageDirectory, IAppLogger? logger = null)
+    public ProfileStoreService(IConfiguration config, IAppLogger? logger)
+        : this(config, null, logger)
+    {
+    }
+
+    public ProfileStoreService(string storageDirectory, CredentialSetService? credentialSetService = null, IAppLogger? logger = null)
     {
         _logger = logger ?? new FileLogger(Path.GetTempPath(), "profileservice.log");
+        _credentialSetService = credentialSetService;
         _storageDirectory = storageDirectory;
         _registryPath = Path.Combine(_storageDirectory, "server_registry.json");
         _profilesStorageDir = Path.Combine(_storageDirectory, "server_profiles");
 
         InitializeStorage();
+    }
+
+    public ProfileStoreService(string storageDirectory, IAppLogger? logger)
+        : this(storageDirectory, null, logger)
+    {
     }
 
     private void InitializeStorage()
@@ -98,6 +162,20 @@ public class ProfileStoreService
                 {
                     foreach (var item in items)
                     {
+                        // Automatic migration: default missing Protocol to WIREGUARD
+                        if (string.IsNullOrWhiteSpace(item.Protocol))
+                        {
+                            item.Protocol = VpnProtocol.WireGuard;
+                        }
+                        if (string.IsNullOrWhiteSpace(item.Provider))
+                        {
+                            item.Provider = "Custom";
+                        }
+                        if (string.IsNullOrWhiteSpace(item.CountryCode))
+                        {
+                            item.CountryCode = item.Country;
+                        }
+
                         var profilePath = Path.Combine(_profilesStorageDir, $"{item.ServerId}.json");
                         ServerProfile? prof = null;
                         if (File.Exists(profilePath))
@@ -115,12 +193,17 @@ public class ProfileStoreService
                             prof = new ServerProfile
                             {
                                 ServerId = item.ServerId,
+                                Protocol = item.Protocol,
                                 Wireguard = new WireGuardProfileConfig
                                 {
                                     Endpoint = item.Endpoint,
                                     Port = item.Port
                                 }
                             };
+                        }
+                        else
+                        {
+                            prof.Protocol = item.Protocol;
                         }
 
                         _serverRegistry[item.ServerId] = (item, prof);
@@ -189,12 +272,23 @@ public class ProfileStoreService
 
         foreach (var s in defaultServers)
         {
-            var entry = new ServerEntry { Id = s.Id, Name = s.Name, Region = s.Region, Enabled = true };
+            var entry = new ServerEntry
+            {
+                Id = s.Id,
+                Name = s.Name,
+                Country = s.Country,
+                CountryCode = s.Country,
+                Region = s.Region,
+                Provider = "Custom",
+                Protocol = VpnProtocol.WireGuard,
+                Enabled = true
+            };
             catalog.Servers.Add(entry);
 
             var profile = new ServerProfile
             {
                 ServerId = s.Id,
+                Protocol = VpnProtocol.WireGuard,
                 Generation = 1,
                 IssuedAt = now,
                 ExpiresAt = now.AddDays(7),
@@ -220,7 +314,10 @@ public class ProfileStoreService
                 ServerId = s.Id,
                 Name = s.Name,
                 Country = s.Country,
+                CountryCode = s.Country,
                 Region = s.Region,
+                Provider = "Custom",
+                Protocol = VpnProtocol.WireGuard,
                 Enabled = true,
                 Endpoint = s.Endpoint,
                 Port = s.Port,
@@ -245,7 +342,8 @@ public class ProfileStoreService
         string confContent,
         string displayName,
         string country,
-        string region)
+        string region,
+        string provider = "Custom")
     {
         if (string.IsNullOrWhiteSpace(confContent))
             return (false, "WireGuard configuration content is empty.", null, null);
@@ -328,13 +426,18 @@ public class ProfileStoreService
         {
             Id = serverId,
             Name = finalName,
+            Country = country,
+            CountryCode = country,
             Region = string.IsNullOrWhiteSpace(region) ? country : region.Trim(),
+            Provider = string.IsNullOrWhiteSpace(provider) ? "Custom" : provider.Trim(),
+            Protocol = VpnProtocol.WireGuard,
             Enabled = true
         };
 
         var profile = new ServerProfile
         {
             ServerId = serverId,
+            Protocol = VpnProtocol.WireGuard,
             SchemaVersion = 1,
             IssuedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.AddDays(30),
@@ -353,9 +456,75 @@ public class ProfileStoreService
         return (true, string.Empty, entry, profile);
     }
 
-    public IReadOnlyList<ServerRegistryItem> GetServers()
+    public static (bool Success, string Error, ServerEntry? Entry, ServerProfile? Profile) ParseOpenVpnConfig(
+        string ovpnContent,
+        string displayName,
+        string country,
+        string countryCode,
+        string region,
+        string? city = null,
+        string provider = "Custom",
+        string? credentialSetId = null,
+        string? username = null,
+        string? password = null,
+        Dictionary<string, string>? supportingFiles = null)
     {
-        return _serverRegistry.Values.Select(v => v.Meta).OrderBy(s => s.Name).ToList();
+        var validation = OpenVpnConfigParser.ParseAndValidate(ovpnContent, supportingFiles, provider);
+        if (!validation.IsValid || validation.ParsedConfig == null)
+        {
+            return (false, validation.Error, null, null);
+        }
+
+        var config = validation.ParsedConfig;
+        config.CredentialSetId = credentialSetId;
+        if (!string.IsNullOrEmpty(username)) config.Username = username;
+        if (!string.IsNullOrEmpty(password)) config.EncryptedPassword = DCScreenSharing.Core.Security.CredentialCrypto.Encrypt(password);
+
+        var primaryRemote = validation.Remotes.FirstOrDefault();
+        var endpointStr = primaryRemote?.Host ?? "unknown";
+        var portVal = primaryRemote?.Port ?? 1194;
+
+        var cCode = !string.IsNullOrWhiteSpace(countryCode) ? countryCode.ToLowerInvariant().Trim() : (!string.IsNullOrWhiteSpace(country) ? country.ToLowerInvariant().Trim() : "srv");
+        var serverId = "ovpn-" + cCode + "-" + Guid.NewGuid().ToString("N").Substring(0, 6);
+        var finalName = string.IsNullOrWhiteSpace(displayName) ? $"{country} OpenVPN ({endpointStr})" : displayName.Trim();
+
+        var entry = new ServerEntry
+        {
+            Id = serverId,
+            Name = finalName,
+            Country = string.IsNullOrWhiteSpace(country) ? countryCode : country.Trim(),
+            CountryCode = !string.IsNullOrWhiteSpace(countryCode) ? countryCode.Trim() : country.Trim(),
+            Region = string.IsNullOrWhiteSpace(region) ? country : region.Trim(),
+            City = city,
+            Provider = validation.Provider,
+            Protocol = VpnProtocol.OpenVpn,
+            Enabled = true
+        };
+
+        var profile = new ServerProfile
+        {
+            ServerId = serverId,
+            Protocol = VpnProtocol.OpenVpn,
+            SchemaVersion = 1,
+            IssuedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddDays(30),
+            Openvpn = config
+        };
+
+        return (true, string.Empty, entry, profile);
+    }
+
+    public IReadOnlyList<ServerRegistryItem> GetServers(string? protocol = null)
+    {
+        var query = _serverRegistry.Values.Select(v => v.Meta);
+
+        if (!string.IsNullOrEmpty(protocol))
+        {
+            var norm = VpnProtocol.Normalize(protocol);
+            query = query.Where(s => string.Equals(s.Protocol, norm, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return query.OrderBy(s => s.Name).ToList();
     }
 
     public ServerRegistryItem? GetServerById(string serverId)
@@ -367,7 +536,7 @@ public class ProfileStoreService
         return null;
     }
 
-    public bool AddServer(ServerEntry entry, ServerProfile profile, string country = "")
+    public bool AddWireGuardServer(ServerEntry entry, ServerProfile profile, string country = "", string provider = "Custom")
     {
         lock (_lock)
         {
@@ -377,13 +546,54 @@ public class ProfileStoreService
                 ServerId = entry.Id,
                 Name = entry.Name,
                 Country = string.IsNullOrWhiteSpace(country) ? entry.Region : country,
+                CountryCode = !string.IsNullOrWhiteSpace(entry.CountryCode) ? entry.CountryCode : country,
                 Region = entry.Region,
+                City = entry.City,
+                Provider = string.IsNullOrWhiteSpace(provider) ? entry.Provider : provider,
+                Protocol = VpnProtocol.WireGuard,
                 Enabled = entry.Enabled,
                 Endpoint = profile.Wireguard.Endpoint,
                 Port = profile.Wireguard.Port,
                 CreatedAtUtc = now,
                 UpdatedAtUtc = now
             };
+
+            entry.Protocol = VpnProtocol.WireGuard;
+            profile.Protocol = VpnProtocol.WireGuard;
+
+            _serverRegistry[entry.Id] = (regItem, profile);
+            SaveServerRegistry();
+            return true;
+        }
+    }
+
+    public bool AddOpenVpnServer(ServerEntry entry, ServerProfile profile, string country = "", string countryCode = "", string? city = null, string provider = "Custom", string? credentialSetId = null)
+    {
+        lock (_lock)
+        {
+            var now = DateTime.UtcNow;
+            var primaryRemote = profile.Openvpn?.RemoteEndpoints.FirstOrDefault();
+
+            var regItem = new ServerRegistryItem
+            {
+                ServerId = entry.Id,
+                Name = entry.Name,
+                Country = string.IsNullOrWhiteSpace(country) ? entry.Region : country,
+                CountryCode = !string.IsNullOrWhiteSpace(countryCode) ? countryCode : entry.CountryCode,
+                Region = entry.Region,
+                City = city ?? entry.City,
+                Provider = string.IsNullOrWhiteSpace(provider) ? entry.Provider : provider,
+                Protocol = VpnProtocol.OpenVpn,
+                Enabled = entry.Enabled,
+                Endpoint = primaryRemote?.Host ?? string.Empty,
+                Port = primaryRemote?.Port ?? 1194,
+                CredentialSetId = credentialSetId ?? profile.Openvpn?.CredentialSetId,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+
+            entry.Protocol = VpnProtocol.OpenVpn;
+            profile.Protocol = VpnProtocol.OpenVpn;
 
             _serverRegistry[entry.Id] = (regItem, profile);
             SaveServerRegistry();
@@ -404,6 +614,35 @@ public class ProfileStoreService
                 meta.UpdatedAtUtc = DateTime.UtcNow;
 
                 _serverRegistry[serverId] = (meta, existing.Profile);
+                SaveServerRegistry();
+                return true;
+            }
+            return false;
+        }
+    }
+
+    public bool UpdateOpenVpnServer(string serverId, string displayName, string region, string? city, string provider, string? credentialSetId, bool enabled)
+    {
+        lock (_lock)
+        {
+            if (_serverRegistry.TryGetValue(serverId, out var existing))
+            {
+                var meta = existing.Meta;
+                meta.Name = string.IsNullOrWhiteSpace(displayName) ? meta.Name : displayName.Trim();
+                meta.Region = string.IsNullOrWhiteSpace(region) ? meta.Region : region.Trim();
+                meta.City = city;
+                if (!string.IsNullOrWhiteSpace(provider)) meta.Provider = provider.Trim();
+                meta.CredentialSetId = credentialSetId;
+                meta.Enabled = enabled;
+                meta.UpdatedAtUtc = DateTime.UtcNow;
+
+                var prof = existing.Profile;
+                if (prof.Openvpn != null)
+                {
+                    prof.Openvpn.CredentialSetId = credentialSetId;
+                }
+
+                _serverRegistry[serverId] = (meta, prof);
                 SaveServerRegistry();
                 return true;
             }
@@ -476,7 +715,12 @@ public class ProfileStoreService
                     {
                         Id = s.Meta.ServerId,
                         Name = s.Meta.Name,
+                        Country = s.Meta.Country,
+                        CountryCode = s.Meta.CountryCode,
                         Region = s.Meta.Region,
+                        City = s.Meta.City,
+                        Provider = s.Meta.Provider,
+                        Protocol = s.Meta.Protocol,
                         Enabled = true
                     }).ToList()
                 };
@@ -498,6 +742,25 @@ public class ProfileStoreService
                     prof.Generation = nextGen;
                     prof.IssuedAt = now;
                     prof.ExpiresAt = now.AddDays(30);
+                    prof.Protocol = s.Meta.Protocol;
+
+                    // If OpenVPN server is linked to a CredentialSetId, resolve latest credentials
+                    if (VpnProtocol.IsOpenVpn(prof.Protocol) && prof.Openvpn != null)
+                    {
+                        var credId = !string.IsNullOrEmpty(prof.Openvpn.CredentialSetId)
+                            ? prof.Openvpn.CredentialSetId
+                            : s.Meta.CredentialSetId;
+
+                        if (!string.IsNullOrEmpty(credId) && _credentialSetService != null)
+                        {
+                            var (uname, decPass) = _credentialSetService.ResolveCredentials(credId);
+                            if (uname != null) prof.Openvpn.Username = uname;
+                            if (decPass != null)
+                            {
+                                prof.Openvpn.EncryptedPassword = DCScreenSharing.Core.Security.CredentialCrypto.Encrypt(decPass);
+                            }
+                        }
+                    }
 
                     var profileJson = JsonSerializer.Serialize(prof, new JsonSerializerOptions { WriteIndented = true });
                     var profileSig = ProfileCrypto.SignData(profileJson, privKey);
@@ -507,7 +770,7 @@ public class ProfileStoreService
                 }
 
                 SaveGenerationInternal(manifest, publishedBy);
-                _logger.Info($"Published new generation {nextGen} by {publishedBy} with {enabledServers.Count} servers.");
+                _logger.Info($"Published new generation {nextGen} by {publishedBy} with {enabledServers.Count} servers (WG: {enabledServers.Count(s => VpnProtocol.IsWireGuard(s.Meta.Protocol))}, OVPN: {enabledServers.Count(s => VpnProtocol.IsOpenVpn(s.Meta.Protocol))}).");
                 return (true, string.Empty, nextGen);
             }
             catch (Exception ex)
@@ -638,11 +901,14 @@ public class ProfileStoreService
                     if (manifest != null)
                     {
                         var catalog = JsonSerializer.Deserialize<ServerCatalog>(manifest.CatalogJson);
+                        var srvs = catalog?.Servers ?? new List<ServerEntry>();
                         history.Add(new GenerationRecord
                         {
                             Generation = manifest.Generation,
                             PublishedAtUtc = manifest.PublishedAtUtc,
-                            ServerCount = catalog?.Servers.Count ?? 0,
+                            ServerCount = srvs.Count,
+                            WireGuardCount = srvs.Count(s => VpnProtocol.IsWireGuard(s.Protocol)),
+                            OpenVpnCount = srvs.Count(s => VpnProtocol.IsOpenVpn(s.Protocol)),
                             IsActive = manifest.Generation == activeGen
                         });
                     }
