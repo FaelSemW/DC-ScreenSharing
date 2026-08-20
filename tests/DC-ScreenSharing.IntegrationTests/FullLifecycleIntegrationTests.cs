@@ -588,6 +588,7 @@ AllowedIPs = 0.0.0.0/0
         vm.Generation = activeGen;
 
         // Add a dummy server so validation passes
+        vm.Servers.Clear();
         var server = new MaintainerServerItem
         {
             Id = "test-stale",

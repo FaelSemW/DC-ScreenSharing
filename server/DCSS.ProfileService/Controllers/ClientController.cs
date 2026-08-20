@@ -47,7 +47,7 @@ public class ClientController : ControllerBase
     public IActionResult EnrollClient([FromBody] EnrollClientRequest request)
     {
         var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
-        if (!_enrollmentService.CheckRateLimit(clientIp, maxPerMinute: 10))
+        if (!_enrollmentService.CheckRateLimit(clientIp, maxPerMinute: 300))
         {
             return StatusCode(StatusCodes.Status429TooManyRequests, new { error = "Rate limit exceeded." });
         }
@@ -78,7 +78,7 @@ public class ClientController : ControllerBase
             return BadRequest(new { error = "Missing clientId parameter." });
 
         var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
-        if (!_enrollmentService.CheckRateLimit(clientIp, maxPerMinute: 30))
+        if (!_enrollmentService.CheckRateLimit(clientIp, maxPerMinute: 300))
         {
             return StatusCode(StatusCodes.Status429TooManyRequests, new { error = "Rate limit exceeded." });
         }
@@ -122,7 +122,7 @@ public class ClientController : ControllerBase
     {
         var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
 
-        if (!_enrollmentService.CheckRateLimit(clientIp, maxPerMinute: 20))
+        if (!_enrollmentService.CheckRateLimit(clientIp, maxPerMinute: 300))
         {
             return StatusCode(StatusCodes.Status429TooManyRequests, new { error = "Rate limit exceeded. Too many profile requests." });
         }

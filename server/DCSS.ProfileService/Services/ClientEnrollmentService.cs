@@ -25,8 +25,13 @@ public class EnrolledClientRecord
     public DateTime EnrolledAtUtc { get; set; } = DateTime.UtcNow;
     public string RegisteredIp { get; set; } = string.Empty;
     public string EnrolledViaTicketHash { get; set; } = string.Empty;
+    public string? EnrolledViaAccessKeyId { get; set; }
+    public string? AccessKeyName { get; set; }
+    public string? AccessKeyType { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime? RevokedAtUtc { get; set; }
+    public DateTime? LastSeenAtUtc { get; set; }
+    public string? AppVersion { get; set; }
 }
 
 public class ActiveChallengeRecord
@@ -41,18 +46,30 @@ public class ClientEnrollmentService
 {
     private readonly string _ticketsStoragePath;
     private readonly string _clientsStoragePath;
+    private readonly AccessKeyService? _accessKeyService;
     private readonly ConcurrentDictionary<string, EnrollmentTicketRecord> _tickets = new();
     private readonly ConcurrentDictionary<string, EnrolledClientRecord> _clients = new();
     private readonly ConcurrentDictionary<string, ActiveChallengeRecord> _challenges = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _ipRateLimitTracker = new();
     private readonly object _lock = new();
 
-    public ClientEnrollmentService(IConfiguration config)
+    public ClientEnrollmentService(IConfiguration config, AccessKeyService? accessKeyService = null)
     {
+        _accessKeyService = accessKeyService;
         var basePath = config["ProfileService:StoragePath"] ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "storage");
         Directory.CreateDirectory(basePath);
         _ticketsStoragePath = Path.Combine(basePath, "enrollment_tickets.json");
         _clientsStoragePath = Path.Combine(basePath, "enrolled_clients.json");
+
+        LoadState();
+    }
+
+    public ClientEnrollmentService(string storageDirectory, AccessKeyService? accessKeyService = null)
+    {
+        _accessKeyService = accessKeyService;
+        Directory.CreateDirectory(storageDirectory);
+        _ticketsStoragePath = Path.Combine(storageDirectory, "enrollment_tickets.json");
+        _clientsStoragePath = Path.Combine(storageDirectory, "enrolled_clients.json");
 
         LoadState();
     }
@@ -98,10 +115,14 @@ public class ClientEnrollmentService
             try
             {
                 var ticketsJson = JsonSerializer.Serialize(_tickets.Values.ToList(), new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(_ticketsStoragePath, ticketsJson);
+                var tempTicketsPath = _ticketsStoragePath + ".tmp";
+                File.WriteAllText(tempTicketsPath, ticketsJson);
+                File.Move(tempTicketsPath, _ticketsStoragePath, overwrite: true);
 
                 var clientsJson = JsonSerializer.Serialize(_clients.Values.ToList(), new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(_clientsStoragePath, clientsJson);
+                var tempClientsPath = _clientsStoragePath + ".tmp";
+                File.WriteAllText(tempClientsPath, clientsJson);
+                File.Move(tempClientsPath, _clientsStoragePath, overwrite: true);
             }
             catch { }
         }
@@ -141,20 +162,53 @@ public class ClientEnrollmentService
         }
     }
 
-    public (bool Success, string Error, string ClientId) EnrollClientWithTicket(string plaintextTicket, string publicKeyPem, string clientIp)
+    public (bool Success, string Error, string ClientId) EnrollClientWithTicket(string plaintextTicketOrKey, string publicKeyPem, string clientIp)
     {
-        if (string.IsNullOrWhiteSpace(plaintextTicket))
-            return (false, "Enrollment ticket is required.", string.Empty);
+        if (string.IsNullOrWhiteSpace(plaintextTicketOrKey))
+            return (false, "Enrollment ticket or access key is required.", string.Empty);
 
         if (string.IsNullOrWhiteSpace(publicKeyPem))
             return (false, "Client public key is required.", string.Empty);
 
         lock (_lock)
         {
-            var hash = HashTicket(plaintextTicket);
+            // 1. Try modern AccessKeyService first
+            if (_accessKeyService != null)
+            {
+                var (keySuccess, keyError, key) = _accessKeyService.ValidateAndConsumeKey(plaintextTicketOrKey);
+                if (keySuccess && key != null)
+                {
+                    var newClientId = Guid.NewGuid().ToString("N");
+                    var clientRecord = new EnrolledClientRecord
+                    {
+                        ClientId = newClientId,
+                        PublicKeyPem = publicKeyPem,
+                        EnrolledAtUtc = DateTime.UtcNow,
+                        RegisteredIp = clientIp,
+                        EnrolledViaTicketHash = key.CodeHash,
+                        EnrolledViaAccessKeyId = key.Id,
+                        AccessKeyName = key.Name,
+                        AccessKeyType = key.Type,
+                        IsActive = true,
+                        LastSeenAtUtc = DateTime.UtcNow
+                    };
+
+                    _clients[newClientId] = clientRecord;
+                    SaveState();
+
+                    return (true, string.Empty, newClientId);
+                }
+                else if (key != null) // Key was found in AccessKey store but failed validation (expired/revoked/capacity)
+                {
+                    return (false, keyError, string.Empty);
+                }
+            }
+
+            // 2. Fallback to legacy ticket store
+            var hash = HashTicket(plaintextTicketOrKey);
             if (!_tickets.TryGetValue(hash, out var ticket))
             {
-                return (false, "Invalid enrollment ticket.", string.Empty);
+                return (false, "Invalid enrollment ticket or access key.", string.Empty);
             }
 
             if (ticket.Revoked)
@@ -172,26 +226,29 @@ public class ClientEnrollmentService
                 return (false, "Enrollment ticket has expired.", string.Empty);
             }
 
-            // Consume ticket
-            var newClientId = Guid.NewGuid().ToString("N");
+            // Consume legacy ticket
+            var legacyClientId = Guid.NewGuid().ToString("N");
             ticket.Used = true;
             ticket.ConsumedAtUtc = DateTime.UtcNow;
-            ticket.ConsumedByClientId = newClientId;
+            ticket.ConsumedByClientId = legacyClientId;
 
-            var clientRecord = new EnrolledClientRecord
+            var legacyClientRecord = new EnrolledClientRecord
             {
-                ClientId = newClientId,
+                ClientId = legacyClientId,
                 PublicKeyPem = publicKeyPem,
                 EnrolledAtUtc = DateTime.UtcNow,
                 RegisteredIp = clientIp,
                 EnrolledViaTicketHash = hash,
-                IsActive = true
+                AccessKeyName = ticket.Description,
+                AccessKeyType = "LEGACY_TICKET",
+                IsActive = true,
+                LastSeenAtUtc = DateTime.UtcNow
             };
 
-            _clients[newClientId] = clientRecord;
+            _clients[legacyClientId] = legacyClientRecord;
             SaveState();
 
-            return (true, string.Empty, newClientId);
+            return (true, string.Empty, legacyClientId);
         }
     }
 
@@ -224,6 +281,8 @@ public class ClientEnrollmentService
         {
             return (false, "Client identity has been revoked.");
         }
+
+        client.LastSeenAtUtc = DateTime.UtcNow;
 
         if (!_challenges.TryGetValue(nonce, out var challenge))
         {
@@ -274,6 +333,57 @@ public class ClientEnrollmentService
         }
     }
 
+    public bool RestoreClient(string clientId)
+    {
+        lock (_lock)
+        {
+            if (_clients.TryGetValue(clientId, out var client))
+            {
+                client.IsActive = true;
+                client.RevokedAtUtc = null;
+                SaveState();
+                return true;
+            }
+            return false;
+        }
+    }
+
+    public int RevokeClientsByAccessKey(string accessKeyId, string? codeHash)
+    {
+        lock (_lock)
+        {
+            int revokedCount = 0;
+            var now = DateTime.UtcNow;
+            foreach (var client in _clients.Values)
+            {
+                if ((!string.IsNullOrEmpty(client.EnrolledViaAccessKeyId) && client.EnrolledViaAccessKeyId == accessKeyId) ||
+                    (!string.IsNullOrEmpty(codeHash) && client.EnrolledViaTicketHash == codeHash))
+                {
+                    if (client.IsActive)
+                    {
+                        client.IsActive = false;
+                        client.RevokedAtUtc = now;
+                        revokedCount++;
+                    }
+                }
+            }
+            if (revokedCount > 0)
+            {
+                SaveState();
+            }
+            return revokedCount;
+        }
+    }
+
+    public IReadOnlyList<EnrolledClientRecord> GetClientsByAccessKey(string accessKeyId, string? codeHash)
+    {
+        return _clients.Values.Where(c => 
+            (!string.IsNullOrEmpty(c.EnrolledViaAccessKeyId) && c.EnrolledViaAccessKeyId == accessKeyId) ||
+            (!string.IsNullOrEmpty(codeHash) && c.EnrolledViaTicketHash == codeHash))
+            .OrderByDescending(c => c.EnrolledAtUtc)
+            .ToList();
+    }
+
     public bool RevokeTicket(string ticketHash)
     {
         lock (_lock)
@@ -293,9 +403,35 @@ public class ClientEnrollmentService
         return _tickets.Values.OrderByDescending(t => t.CreatedAtUtc).ToList();
     }
 
-    public IReadOnlyList<EnrolledClientRecord> GetClients()
+    public IReadOnlyList<EnrolledClientRecord> GetClients(string? status = null, string? search = null)
     {
-        return _clients.Values.OrderByDescending(c => c.EnrolledAtUtc).ToList();
+        var query = _clients.Values.AsEnumerable();
+
+        if (!string.IsNullOrEmpty(status))
+        {
+            if (string.Equals(status, "active", StringComparison.OrdinalIgnoreCase))
+                query = query.Where(c => c.IsActive);
+            else if (string.Equals(status, "revoked", StringComparison.OrdinalIgnoreCase))
+                query = query.Where(c => !c.IsActive);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            query = query.Where(c =>
+                c.ClientId.Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                (c.AccessKeyName != null && c.AccessKeyName.Contains(s, StringComparison.OrdinalIgnoreCase)) ||
+                (c.RegisteredIp != null && c.RegisteredIp.Contains(s, StringComparison.OrdinalIgnoreCase)) ||
+                (c.AppVersion != null && c.AppVersion.Contains(s, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        return query.OrderByDescending(c => c.EnrolledAtUtc).ToList();
+    }
+
+    public EnrolledClientRecord? GetClientById(string clientId)
+    {
+        _clients.TryGetValue(clientId, out var client);
+        return client;
     }
 
     public bool CheckRateLimit(string clientIp, int maxPerMinute = 20)
