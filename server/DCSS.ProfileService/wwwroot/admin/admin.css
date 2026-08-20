@@ -1137,6 +1137,59 @@ a:hover {
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+    .protocol-tabs {
+        padding: 4px;
+        gap: 6px;
+        margin-bottom: 12px;
+    }
+
+    .protocol-tab {
+        padding: 8px 10px;
+        font-size: 13px;
+    }
+
+    .form-row {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .modal-card {
+        padding: 16px;
+        max-width: calc(100vw - 20px);
+        margin: 10px;
+    }
+
+    .toolbar-actions {
+        width: 100%;
+        justify-content: stretch;
+    }
+
+    .toolbar-actions .btn {
+        flex: 1;
+        font-size: 12px;
+        padding: 8px 10px;
+    }
+
+    .validation-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+}
+
+@media (max-width: 380px) {
+    .protocol-tab {
+        padding: 7px 6px;
+        font-size: 12px;
+        gap: 4px;
+    }
+
+    .validation-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 @keyframes fadeIn {

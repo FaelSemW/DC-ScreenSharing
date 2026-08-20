@@ -3,11 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <meta name="theme-color" content="#0b0f19">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>DC-ScreenSharing — Admin Console</title>
-    <link rel="stylesheet" href="/admin/admin.css">
+    <link rel="stylesheet" href="/admin/admin.css?v=2.0.0">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 </head>
 <body>
@@ -148,7 +151,10 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="ovpn-credential-set">Credential Set (Recommended for provider accounts)</label>
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <label for="ovpn-credential-set" style="margin-bottom: 0;">Credential Set</label>
+                                <button type="button" class="btn-link" onclick="openCredentialSetsModal()" style="font-size: 12px; background: none; border: none; color: var(--accent-primary); cursor: pointer;">+ Manage Credential Sets</button>
+                            </div>
                             <select id="ovpn-credential-set" class="form-control" onchange="toggleInlineCredentials()">
                                 <option value="">None / Inline Certificate Only</option>
                                 <!-- Populated dynamically -->
@@ -167,14 +173,21 @@
                         </div>
 
                         <div class="form-group">
-                            <label>OpenVPN Profile (.ovpn)</label>
+                            <label>OpenVPN Configuration (.ovpn)</label>
                             <div class="dropzone" id="ovpn-dropzone" onclick="document.getElementById('ovpn-file-input').click()">
                                 <div class="dropzone-icon">📄</div>
-                                <div class="dropzone-text">Click or Drag & Drop .ovpn file here</div>
+                                <div class="dropzone-text">Click to Choose .ovpn file or Drag & Drop here</div>
                                 <div class="dropzone-hint">Supports Proton, VPNBook, and standards-compliant OpenVPN client files</div>
                             </div>
                             <input type="file" id="ovpn-file-input" class="hidden" accept=".ovpn,.conf,.txt" onchange="handleOvpnFileSelect(event)">
-                            <textarea id="ovpn-file-text" class="form-control code-editor mt-2" rows="6" placeholder="client&#10;dev tun&#10;proto udp&#10;remote 185.159.157.1 1194&#10;resolv-retry infinite&#10;nobind&#10;persist-key&#10;persist-tun&#10;cipher AES-256-GCM&#10;auth SHA512&#10;auth-user-pass&#10;<ca>&#10;...&#10;</ca>" required oninput="validateOvpnLive()"></textarea>
+                            <textarea id="ovpn-file-text" class="form-control code-editor mt-2" rows="6" placeholder="client&#10;dev tun&#10;proto udp&#10;remote 185.159.157.1 1194&#10;resolv-retry infinite&#10;nobind&#10;persist-key&#10;persist-tun&#10;cipher AES-256-GCM&#10;auth SHA512&#10;auth-user-pass&#10;<ca>&#10;...&#10;</ca>" required oninput="validateOvpnLive(false)"></textarea>
+                        </div>
+
+                        <div class="d-flex gap-2 mb-3">
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-validate-profile" onclick="validateOvpnLive(true)">
+                                <svg class="btn-icon" viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+                                Validate Profile
+                            </button>
                         </div>
 
                         <!-- Live Validation Result Box -->
@@ -188,7 +201,7 @@
 
                         <div class="modal-footer px-0 pb-0">
                             <button type="button" class="btn btn-secondary" onclick="closeAddOpenVpnModal()">Cancel</button>
-                            <button type="submit" class="btn btn-primary" id="submit-add-ovpn-btn">Import OpenVPN Server</button>
+                            <button type="submit" class="btn btn-primary" id="submit-add-ovpn-btn">Add to Registry</button>
                         </div>
                     </form>
                 </div>
@@ -225,7 +238,7 @@
                             <label>Select .ovpn Files</label>
                             <div class="dropzone" id="bulk-dropzone" onclick="document.getElementById('bulk-files-input').click()">
                                 <div class="dropzone-icon">📁</div>
-                                <div class="dropzone-text">Click or Drag & Drop multiple .ovpn files here</div>
+                                <div class="dropzone-text">Click to Choose multiple .ovpn files or Drag & Drop</div>
                                 <div class="dropzone-hint">Upload 1 to 50+ OpenVPN profile files at once</div>
                             </div>
                             <input type="file" id="bulk-files-input" class="hidden" accept=".ovpn,.conf" multiple onchange="handleBulkFilesSelect(event)">
@@ -511,7 +524,7 @@
                             <span class="toolbar-info">WireGuard Server Profiles (.conf)</span>
                             <button class="btn btn-primary" onclick="openAddServerModal()">
                                 <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                                Add WireGuard (.conf)
+                                Add WireGuard Server
                             </button>
                         </div>
 
@@ -521,7 +534,7 @@
                             <div class="toolbar-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
                                 <button class="btn btn-secondary" onclick="openCredentialSetsModal()">
                                     <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
-                                    Credential Sets
+                                    Manage Credentials
                                 </button>
                                 <button class="btn btn-secondary" onclick="openBulkOpenVpnModal()">
                                     <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
@@ -529,7 +542,7 @@
                                 </button>
                                 <button class="btn btn-primary" onclick="openAddOpenVpnModal()">
                                     <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                                    Add OpenVPN (.ovpn)
+                                    Add OpenVPN Server
                                 </button>
                             </div>
                         </div>
@@ -614,7 +627,7 @@
         </div>
     </div>
 
-    <!-- Scripts -->
-    <script src="/admin/admin.js"></script>
+    <!-- Scripts with Cache-Busting Query -->
+    <script src="/admin/admin.js?v=2.0.0"></script>
 </body>
 </html>

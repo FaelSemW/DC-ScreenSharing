@@ -791,18 +791,29 @@ function handleOvpnFileSelect(e) {
     reader.readAsText(file);
 }
 
-function validateOvpnLive() {
+function validateOvpnLive(isManual = false) {
     clearTimeout(validationDebounceTimer);
-    validationDebounceTimer = setTimeout(async () => {
+    
+    const runValidation = async () => {
         const text = document.getElementById('ovpn-file-text')?.value.trim();
         const box = document.getElementById('ovpn-validation-box');
         const grid = document.getElementById('val-grid');
         const title = document.getElementById('val-status-title');
         const errMsg = document.getElementById('val-error-msg');
+        const valBtn = document.getElementById('btn-validate-profile');
 
         if (!text || text.length < 10) {
-            box?.classList.add('hidden');
+            if (isManual) {
+                showToast('Please enter or upload an OpenVPN (.ovpn) configuration first.', 'danger');
+            } else {
+                box?.classList.add('hidden');
+            }
             return;
+        }
+
+        if (valBtn) {
+            valBtn.disabled = true;
+            valBtn.textContent = 'Validating...';
         }
 
         const provider = document.getElementById('ovpn-provider')?.value || 'Custom';
@@ -821,33 +832,73 @@ function validateOvpnLive() {
                 box.className = 'validation-preview valid';
                 title.innerHTML = '<span>✅</span> Safe OpenVPN Profile Validated';
                 errMsg.classList.add('hidden');
+
+                const remotesText = val.additionalRemotesCount > 0 
+                    ? `1 Primary + ${val.additionalRemotesCount} Failover` 
+                    : '1 Remote Endpoint';
+
+                const ipv6Text = val.hasIPv6 ? 'IPv4 + IPv6' : 'IPv4 Standard';
+
                 grid.innerHTML = `
                     <div class="val-item">
-                        <div class="val-label">Protocol</div>
-                        <div class="val-value"><span class="badge ${val.protocol === 'UDP' ? 'badge-udp' : 'badge-tcp'}">${val.protocol}</span></div>
+                        <div class="val-label">Transport</div>
+                        <div class="val-value"><span class="badge ${val.protocol === 'UDP' ? 'badge-udp' : 'badge-tcp'}">${escapeHtml(val.protocol || 'UDP')}</span></div>
                     </div>
                     <div class="val-item">
                         <div class="val-label">Primary Remote</div>
                         <div class="val-value">${escapeHtml(val.primaryRemote || 'N/A')}</div>
                     </div>
                     <div class="val-item">
-                        <div class="val-label">Auth Type</div>
-                        <div class="val-value">${escapeHtml(val.authType)}</div>
+                        <div class="val-label">Authentication</div>
+                        <div class="val-value">${escapeHtml(val.authType || 'TLS')}</div>
                     </div>
                     <div class="val-item">
-                        <div class="val-label">Directives</div>
-                        <div class="val-value text-success">Allowlist Clean</div>
+                        <div class="val-label">Provider</div>
+                        <div class="val-value">${escapeHtml(val.provider || provider)}</div>
+                    </div>
+                    <div class="val-item">
+                        <div class="val-label">Multiple Remotes</div>
+                        <div class="val-value">${escapeHtml(remotesText)}</div>
+                    </div>
+                    <div class="val-item">
+                        <div class="val-label">IP Support</div>
+                        <div class="val-value">${escapeHtml(ipv6Text)}</div>
+                    </div>
+                    <div class="val-item">
+                        <div class="val-label">Security Policy</div>
+                        <div class="val-value text-success">Allowlist Passed</div>
                     </div>
                 `;
+
+                if (isManual) {
+                    showToast('OpenVPN configuration validated successfully.', 'success');
+                }
             } else {
                 box.className = 'validation-preview invalid';
                 title.innerHTML = '<span>❌</span> Configuration Rejected';
-                errMsg.textContent = val.error || 'Rejected by security policy.';
+                errMsg.textContent = val.error || 'Configuration contains dangerous directives or invalid syntax.';
                 errMsg.classList.remove('hidden');
                 grid.innerHTML = '';
+
+                if (isManual) {
+                    showToast(val.error || 'Configuration rejected by security policy.', 'danger');
+                }
             }
-        } catch { }
-    }, 250);
+        } catch (e) {
+            if (isManual) showToast('Failed to validate profile with server.', 'danger');
+        } finally {
+            if (valBtn) {
+                valBtn.disabled = false;
+                valBtn.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg> Validate Profile';
+            }
+        }
+    };
+
+    if (isManual) {
+        runValidation();
+    } else {
+        validationDebounceTimer = setTimeout(runValidation, 300);
+    }
 }
 
 async function handleAddOpenVpnServer(e) {
