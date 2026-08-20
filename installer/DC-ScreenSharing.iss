@@ -1,5 +1,5 @@
 #define MyAppName "DC-ScreenSharing"
-#define MyAppVersion "1.0.5"
+#define MyAppVersion "1.0.6"
 #define MyAppPublisher "DC-ScreenSharing Team"
 #define MyAppURL "https://github.com/FaelSemW/DC-ScreenSharing"
 #define MyAppExeName "DC-ScreenSharing.exe"
@@ -27,6 +27,7 @@ PrivilegesRequiredOverridesAllowed=commandline
 UninstallDisplayIcon={app}\{#MyAppExeName}
 CloseApplications=yes
 RestartApplications=no
+AppMutex=Global\DC_ScreenSharing_App_SingleInstance_Mutex
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -64,6 +65,7 @@ begin
   Exec('sc.exe', 'stop DCSS.NetworkService', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('taskkill.exe', '/F /IM DCSS.NetworkService.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('taskkill.exe', '/F /IM DC-ScreenSharing.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Sleep(1500);
+  Exec('taskkill.exe', '/F /IM dcss-engine.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(1000);
   Result := '';
 end;

@@ -290,24 +290,71 @@ public class ApplicationUpdateService
                 var directPsi = new ProcessStartInfo
                 {
                     FileName = installerPath,
-                    Arguments = "/SILENT /CLOSEAPPLICATIONS",
+                    Arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS",
                     UseShellExecute = true
                 };
                 Process.Start(directPsi);
                 return true;
             }
 
+            var sourceDir = Path.GetDirectoryName(updaterExe)!;
+
+            // Clean up old update runtime directories
+            CleanupOldUpdateRuntimes();
+
+            // Create an isolated temporary directory for the updater runtime
+            // %LOCALAPPDATA%\DC-ScreenSharing\UpdateRuntime\<Guid>\
+            var updateRuntimeDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "DC-ScreenSharing",
+                "UpdateRuntime",
+                Guid.NewGuid().ToString("N"));
+
+            Directory.CreateDirectory(updateRuntimeDir);
+            _logger.Info($"Staging isolated updater runtime from '{sourceDir}' to '{updateRuntimeDir}'...");
+
+            // Copy all executable, library, configuration, and sidecar runtime files
+            // (clrjit.dll, coreclr.dll, hostfxr.dll, etc.) to the temp directory
+            var extensionsToCopy = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ".exe", ".dll", ".json", ".pdb", ".deps.json", ".runtimeconfig.json"
+            };
+
+            foreach (var file in Directory.GetFiles(sourceDir))
+            {
+                var ext = Path.GetExtension(file);
+                if (extensionsToCopy.Contains(ext) || file.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                {
+                    var dest = Path.Combine(updateRuntimeDir, Path.GetFileName(file));
+                    try
+                    {
+                        File.Copy(file, dest, overwrite: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warning($"Could not copy runtime file '{Path.GetFileName(file)}': {ex.Message}");
+                    }
+                }
+            }
+
+            var stagedUpdaterExe = Path.Combine(updateRuntimeDir, "DC-ScreenSharing.Updater.exe");
+            if (!File.Exists(stagedUpdaterExe))
+            {
+                _logger.Error($"Failed to stage updater executable to '{stagedUpdaterExe}'. Falling back to original path.");
+                stagedUpdaterExe = updaterExe;
+            }
+
             var currentPid = Process.GetCurrentProcess().Id;
             var relaunchExe = mainExecutablePath ?? Environment.ProcessPath ?? Path.Combine(baseDir, "DC-ScreenSharing.exe");
 
-            var arguments = $"--staged \"{installerPath}\" --target-pid {currentPid} --relaunch \"{relaunchExe}\"";
-            _logger.Info($"Launching updater: {updaterExe} {arguments}");
+            var arguments = $"--staged \"{installerPath}\" --target-pid {currentPid} --relaunch \"{relaunchExe}\" --runtime-dir \"{updateRuntimeDir}\"";
+            _logger.Info($"Launching isolated updater coordinator: {stagedUpdaterExe} {arguments}");
 
             var psi = new ProcessStartInfo
             {
-                FileName = updaterExe,
+                FileName = stagedUpdaterExe,
                 Arguments = arguments,
-                WorkingDirectory = Path.GetDirectoryName(updaterExe),
+                WorkingDirectory = Path.GetDirectoryName(stagedUpdaterExe),
                 UseShellExecute = true
             };
 
@@ -319,6 +366,34 @@ public class ApplicationUpdateService
             _logger.Error("Failed to launch updater coordinator", ex);
             return false;
         }
+    }
+
+    private void CleanupOldUpdateRuntimes()
+    {
+        try
+        {
+            var runtimesBase = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "DC-ScreenSharing",
+                "UpdateRuntime");
+
+            if (Directory.Exists(runtimesBase))
+            {
+                foreach (var dir in Directory.GetDirectories(runtimesBase))
+                {
+                    try
+                    {
+                        var info = new DirectoryInfo(dir);
+                        if (DateTime.UtcNow - info.LastWriteTimeUtc > TimeSpan.FromMinutes(10))
+                        {
+                            Directory.Delete(dir, recursive: true);
+                        }
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
     }
 
     public static string ComputeSha256(string filePath)

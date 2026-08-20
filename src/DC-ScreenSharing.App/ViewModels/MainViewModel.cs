@@ -671,11 +671,14 @@ public class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    private bool _updateAttemptedThisSession = false;
+
     public async Task ApplyUpdateAsync()
     {
-        if (_pendingUpdateInfo == null || !_pendingUpdateInfo.UpdateAvailable)
+        if (_updateAttemptedThisSession || _pendingUpdateInfo == null || !_pendingUpdateInfo.UpdateAvailable)
             return;
 
+        _updateAttemptedThisSession = true;
         IsUpdating = true;
         UpdateStatusText = "Downloading update (0%)...";
         UpdateProgress = 0;
@@ -694,9 +697,10 @@ public class MainViewModel : INotifyPropertyChanged
             var installerPath = await _updateService.DownloadAndVerifyUpdateAsync(_pendingUpdateInfo, progress);
             if (string.IsNullOrEmpty(installerPath) || !File.Exists(installerPath))
             {
-                ErrorMessage = "Failed to download update package. Please try again.";
-                UpdateStatusText = "Update download failed.";
+                ErrorMessage = "Update could not be installed. Please restart DC-ScreenSharing and try again.";
+                UpdateStatusText = "Update could not be installed. Please restart DC-ScreenSharing and try again.";
                 IsUpdating = false;
+                IsUpdateAvailable = false;
                 return;
             }
 
@@ -718,17 +722,19 @@ public class MainViewModel : INotifyPropertyChanged
             }
             else
             {
-                ErrorMessage = "Could not start update coordinator.";
-                UpdateStatusText = "Failed to launch updater.";
+                ErrorMessage = "Update could not be installed. Please restart DC-ScreenSharing and try again.";
+                UpdateStatusText = "Update could not be installed. Please restart DC-ScreenSharing and try again.";
                 IsUpdating = false;
+                IsUpdateAvailable = false;
             }
         }
         catch (Exception ex)
         {
             _logger.Error("Exception while applying update", ex);
-            ErrorMessage = $"Update error: {ex.Message}";
-            UpdateStatusText = "Update failed.";
+            ErrorMessage = "Update could not be installed. Please restart DC-ScreenSharing and try again.";
+            UpdateStatusText = "Update could not be installed. Please restart DC-ScreenSharing and try again.";
             IsUpdating = false;
+            IsUpdateAvailable = false;
         }
     }
 
