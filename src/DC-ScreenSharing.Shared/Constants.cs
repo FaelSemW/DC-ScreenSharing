@@ -9,7 +9,7 @@ public static class Constants
 
     public const string GitHubOwner = "FaelSemW";
     public const string GitHubRepository = "DC-ScreenSharing";
-    public const string CurrentVersion = "1.0.6";
+    public const string CurrentVersion = "1.0.7";
     public const string GitHubReleasesApiUrl = "https://api.github.com/repos/FaelSemW/DC-ScreenSharing/releases/latest";
 
     public const string PipeName = "DCSS_NetworkService_Pipe";

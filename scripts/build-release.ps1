@@ -1,6 +1,6 @@
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "1.0.6",
+    [string]$Version = "1.0.7",
     [int]$StageTimeoutSeconds = 300
 )
 
@@ -165,11 +165,34 @@ if (Test-Path $nativeSource) {
     Copy-Item "$nativeSource\*" $nativeTarget -Force
 }
 
+# Deploy WFP Driver Package
+$driverTarget = Join-Path $publishDir "driver"
+New-Item -ItemType Directory -Force -Path $driverTarget | Out-Null
+
+$driverScript = Join-Path $repoRoot "scripts\build-driver.ps1"
+if (Test-Path $driverScript) {
+    & powershell.exe -ExecutionPolicy Bypass -File $driverScript -Configuration $Configuration -Platform x64
+}
+
+$driverSourceDir = Join-Path $repoRoot "native\DCSS.WfpCallout\x64\$Configuration"
+$pkgSourceDir = Join-Path $repoRoot "native\DCSS.WfpCallout\pkg\x64\$Configuration"
+
+if (Test-Path "$driverSourceDir\DCSS.WfpCallout.sys") {
+    Copy-Item "$driverSourceDir\DCSS.WfpCallout.sys" $driverTarget -Force
+}
+if (Test-Path "$pkgSourceDir\DCSS.WfpCallout.inf") {
+    Copy-Item "$pkgSourceDir\DCSS.WfpCallout.inf" $driverTarget -Force
+}
+if (Test-Path "$pkgSourceDir\DCSS.WfpCallout.cat") {
+    Copy-Item "$pkgSourceDir\DCSS.WfpCallout.cat" $driverTarget -Force
+}
+
 # Verify runtime dependencies
 $requiredFiles = @(
     "$publishDir\DC-ScreenSharing.exe",
     "$publishDir\DCSS.NetworkService.exe",
     "$publishDir\DC-ScreenSharing.Updater.exe",
+    "$publishDir\driver\DCSS.WfpCallout.sys",
     "$publishDir\native\dcss-engine.exe",
     "$publishDir\native\wintun.dll",
     "$maintainerDir\DCSS.Maintainer.exe",

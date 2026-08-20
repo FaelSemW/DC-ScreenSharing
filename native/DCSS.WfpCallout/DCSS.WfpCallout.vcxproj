@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{4A1B2C3D-E4F5-6A7B-8C9D-0E1F2A3B4C5D}</ProjectGuid>
+    <TemplateGuid>{1bc93793-694f-48fe-9372-81e2b05508d9}</TemplateGuid>
+    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
+    <MinimumVisualStudioVersion>12.0</MinimumVisualStudioVersion>
+    <Configuration>Release</Configuration>
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+    <RootNamespace>DCSS.WfpCallout</RootNamespace>
+    <DriverType>KMDF</DriverType>
+    <KMDF_VERSION_MAJOR>1</KMDF_VERSION_MAJOR>
+    <KMDF_VERSION_MINOR>15</KMDF_VERSION_MINOR>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" Condition="Exists('$(VCTargetsPath)\Microsoft.Cpp.Default.props')" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <TargetVersion>Windows10</TargetVersion>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+    <ConfigurationType>Driver</ConfigurationType>
+    <DriverTargetPlatform>Universal</DriverTargetPlatform>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <TargetVersion>Windows10</TargetVersion>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+    <ConfigurationType>Driver</ConfigurationType>
+    <DriverTargetPlatform>Universal</DriverTargetPlatform>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" Condition="Exists('$(VCTargetsPath)\Microsoft.Cpp.props')" />
+  <ItemGroup>
+    <ClCompile Include="DriverEntry.cpp" />
+    <ClCompile Include="Callout.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Callout.h" />
+    <ClInclude Include="WfpGuids.h" />
+    <ClInclude Include="Trace.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Inf Include="DCSS.WfpCallout.inf" />
+  </ItemGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);POOL_ZEROING_SUPPORT=1</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>$(DDK_LIB_PATH)fwpkclnt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <DriverSign>
+      <FileDigestAlgorithm>SHA256</FileDigestAlgorithm>
+    </DriverSign>
+    <Inf2Cat>
+      <EnableInf2Cat>false</EnableInf2Cat>
+    </Inf2Cat>
+  </ItemDefinitionGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" Condition="Exists('$(VCTargetsPath)\Microsoft.Cpp.targets')" />
+</Project>

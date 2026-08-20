@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="..\DC-ScreenSharing.Shared\DC-ScreenSharing.Shared.csproj" />
     <ProjectReference Include="..\DC-ScreenSharing.Networking\DC-ScreenSharing.Networking.csproj" />
+    <ProjectReference Include="..\DC-ScreenSharing.Core\DC-ScreenSharing.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

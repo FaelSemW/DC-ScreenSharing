@@ -1,0 +1,42 @@
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = SecurityDriver
+ClassGuid   = {d25a3e7e-0725-4264-b5a9-b422df466742}
+Provider    = %ProviderName%
+CatalogFile = DCSS.WfpCallout.cat
+DriverVer   = 08/20/2026,1.0.0.1
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 12 ; %windir%\system32\drivers
+
+[SourceDisksNames.amd64]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles.amd64]
+DCSS.WfpCallout.sys = 1,,
+
+[DefaultInstall.NT$ARCH$]
+CopyFiles = DCSS_Files
+
+[DCSS_Files]
+DCSS.WfpCallout.sys,,,2
+
+[DefaultInstall.NT$ARCH$.Services]
+AddService = %ServiceName%,,DCSS_Service_Inst
+
+[DCSS_Service_Inst]
+DisplayName    = %ServiceDisplayName%
+Description    = %ServiceDesc%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\DCSS.WfpCallout.sys
+LoadOrderGroup = NDIS
+
+[Strings]
+ProviderName       = "DC-ScreenSharing"
+DiskName           = "DCSS WFP Callout Driver Installation Disk"
+ServiceName        = "DCSS.WfpCallout"
+ServiceDisplayName = "DC-ScreenSharing WFP Callout Driver"
+ServiceDesc        = "Provides process-aware packet redirection for DC-ScreenSharing"

@@ -408,9 +408,16 @@ public class ProcessRoutingEngine
                     tag = "tun-in",
                     interface_name = Constants.DefaultInterfaceName,
                     address = new[] { "172.19.0.1/30", "fdfe:dc::1/126" },
-                    auto_route = true,
+                    auto_route = false,
                     strict_route = false,
-                    stack = "system"
+                    stack = "gvisor"
+                },
+                new
+                {
+                    type = "mixed",
+                    tag = "socks-in",
+                    listen = "127.0.0.1",
+                    listen_port = 50181
                 }
             },
             endpoints = new object[]
@@ -449,6 +456,11 @@ public class ProcessRoutingEngine
                 default_domain_resolver = "dns-direct",
                 rules = new object[]
                 {
+                    new
+                    {
+                        inbound = new[] { "socks-in" },
+                        outbound = "wg-out"
+                    },
                     new
                     {
                         protocol = "dns",

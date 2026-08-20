@@ -5,6 +5,8 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using DCScreenSharing.Networking;
+using DCScreenSharing.Networking.Proxy;
+using DCScreenSharing.Networking.Wfp;
 using DCScreenSharing.Shared;
 using DCScreenSharing.Shared.Contracts;
 using DCScreenSharing.Shared.Logging;
@@ -16,6 +18,8 @@ public class IpcServer
     private readonly ProcessRoutingEngine _engine;
     private readonly CrashRecoveryManager _recovery;
     private readonly IAppLogger _logger;
+    private readonly RedirectProxyService _proxy;
+    private readonly WfpManager _wfpManager;
     private CancellationTokenSource? _cts;
     private Task? _serverTask;
     private readonly object _serverLock = new();
@@ -26,11 +30,13 @@ public class IpcServer
     private DateTime? _connectedSinceUtc;
     private string? _lastError;
 
-    public IpcServer(ProcessRoutingEngine engine, CrashRecoveryManager recovery, IAppLogger logger)
+    public IpcServer(ProcessRoutingEngine engine, CrashRecoveryManager recovery, IAppLogger logger, RedirectProxyService? proxy = null, WfpManager? wfpManager = null)
     {
         _engine = engine;
         _recovery = recovery;
         _logger = logger;
+        _proxy = proxy ?? new RedirectProxyService(logger);
+        _wfpManager = wfpManager ?? new WfpManager(logger);
     }
 
     public void Start()
@@ -59,6 +65,8 @@ public class IpcServer
             }
             catch { }
 
+            _wfpManager.Dispose();
+            _proxy.Dispose();
             _engine.Stop();
             _recovery.ClearState();
             _isConnected = false;
@@ -218,6 +226,8 @@ public class IpcServer
                 break;
 
             case IpcCommand.CleanupOrphaned:
+                _wfpManager.RemoveAllFilters();
+                _proxy.Stop();
                 _recovery.PerformStartupRecovery(_engine);
                 response.PayloadJson = "\"cleaned\"";
                 break;
@@ -288,6 +298,29 @@ public class IpcServer
 
             if (started)
             {
+                // Start redirect proxy
+                _ = _proxy.StartAsync();
+
+                // Install dynamic WFP process filters
+                var discordPaths = new List<string>();
+                if (!string.IsNullOrEmpty(config.DiscordExecutablePath) && File.Exists(config.DiscordExecutablePath))
+                {
+                    discordPaths.Add(config.DiscordExecutablePath);
+                }
+                var locator = new DCScreenSharing.Core.Discord.DiscordLocator();
+                var discovered = locator.DiscoverAllInstallations();
+                foreach (var d in discovered)
+                {
+                    if (!string.IsNullOrEmpty(d.ExecutablePath) && File.Exists(d.ExecutablePath) && !discordPaths.Contains(d.ExecutablePath, StringComparer.OrdinalIgnoreCase))
+                    {
+                        discordPaths.Add(d.ExecutablePath);
+                    }
+                }
+                if (discordPaths.Count > 0)
+                {
+                    _wfpManager.InstallDiscordFilters(discordPaths);
+                }
+
                 _isConnected = true;
                 _activeServerId = config.ServerId;
                 _activeServerName = config.ServerName;
@@ -338,6 +371,8 @@ public class IpcServer
         try
         {
             _logger.Info("[IPC:StopTunnel] Stopping tunnel on IPC request...");
+            _wfpManager.RemoveAllFilters();
+            _proxy.Stop();
             _engine.Stop();
             _isConnected = false;
             _activeServerId = null;
@@ -369,3 +404,4 @@ public class IpcServer
         };
     }
 }
+
