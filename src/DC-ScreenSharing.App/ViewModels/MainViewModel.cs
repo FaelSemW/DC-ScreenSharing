@@ -75,6 +75,9 @@ public class MainViewModel : INotifyPropertyChanged
     private string _updateTitle = string.Empty;
     private string _updateStatusText = string.Empty;
     private bool _isUpdating;
+    private int _updateProgress;
+    private UpdateCheckResult? _pendingUpdateInfo;
+
     // Server Catalog State
     private bool _isLoadingServers;
     private string? _serverCatalogError;
@@ -786,6 +789,12 @@ public class MainViewModel : INotifyPropertyChanged
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
     protected bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
     {
         if (EqualityComparer<T>.Default.Equals(storage, value))
