@@ -23,7 +23,7 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
-PrivilegesRequiredOverridesAllowed=dialog commandline
+PrivilegesRequiredOverridesAllowed=commandline
 UninstallDisplayIcon={app}\{#MyAppExeName}
 CloseApplications=yes
 RestartApplications=no
@@ -60,8 +60,10 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
 begin
-  // Stop existing service if running so binaries can be overwritten cleanly
+  // Stop existing service and processes so binaries can be overwritten cleanly
   Exec('sc.exe', 'stop DCSS.NetworkService', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Sleep(1000);
+  Exec('taskkill.exe', '/F /IM DCSS.NetworkService.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM DC-ScreenSharing.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(1500);
   Result := '';
 end;
