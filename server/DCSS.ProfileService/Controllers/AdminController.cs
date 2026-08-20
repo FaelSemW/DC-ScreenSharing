@@ -49,6 +49,7 @@ public class AddServerRequest
     public string? City { get; set; }
     public string Provider { get; set; } = "Custom";
     public string ConfContent { get; set; } = string.Empty;
+    public bool PublishImmediately { get; set; } = false;
 }
 
 public class UpdateServerRequest
@@ -56,6 +57,7 @@ public class UpdateServerRequest
     public string DisplayName { get; set; } = string.Empty;
     public string Region { get; set; } = string.Empty;
     public bool Enabled { get; set; } = true;
+    public bool PublishImmediately { get; set; } = false;
 }
 
 public class ValidateOpenVpnRequest
@@ -78,6 +80,7 @@ public class AddOpenVpnServerRequest
     public string? Username { get; set; }
     public string? Password { get; set; }
     public Dictionary<string, string>? SupportingFiles { get; set; }
+    public bool PublishImmediately { get; set; } = false;
 }
 
 public class BulkImportOpenVpnRequest
@@ -501,6 +504,13 @@ public class AdminController : ControllerBase
         return Ok(servers);
     }
 
+    [HttpGet("servers/publication-status")]
+    public IActionResult GetPublicationStatus()
+    {
+        var status = _store.GetPublicationStatus();
+        return Ok(status);
+    }
+
     [HttpPost("servers")]
     public IActionResult AddWireGuardServer([FromBody] AddServerRequest request)
     {
@@ -537,11 +547,36 @@ public class AdminController : ControllerBase
             ["endpoint"] = profile.Wireguard.Endpoint
         });
 
+        if (request.PublishImmediately)
+        {
+            var (pubSuccess, pubError, newGen) = _store.CreateAndPublishNewGeneration(publishedBy: "Admin Web Console (Save & Publish)");
+            if (pubSuccess)
+            {
+                return Ok(new
+                {
+                    success = true,
+                    published = true,
+                    generation = newGen,
+                    server = entry,
+                    message = $"WireGuard server '{entry.Name}' added and published in Generation #{newGen}."
+                });
+            }
+            return Ok(new
+            {
+                success = true,
+                published = false,
+                publishError = pubError,
+                server = entry,
+                message = $"WireGuard server '{entry.Name}' added to registry, but publish failed: {pubError}"
+            });
+        }
+
         return Ok(new
         {
             success = true,
+            published = false,
             server = entry,
-            message = $"WireGuard server '{entry.Name}' added to registry. Remember to create and publish a new generation to apply changes to clients."
+            message = $"WireGuard server '{entry.Name}' added to registry. Remember to publish changes to clients."
         });
     }
 
@@ -614,11 +649,36 @@ public class AdminController : ControllerBase
             ["primaryRemote"] = profile.Openvpn?.RemoteEndpoints.FirstOrDefault()?.Host ?? "N/A"
         });
 
+        if (request.PublishImmediately)
+        {
+            var (pubSuccess, pubError, newGen) = _store.CreateAndPublishNewGeneration(publishedBy: "Admin Web Console (Save & Publish)");
+            if (pubSuccess)
+            {
+                return Ok(new
+                {
+                    success = true,
+                    published = true,
+                    generation = newGen,
+                    server = entry,
+                    message = $"OpenVPN server '{entry.Name}' added and published in Generation #{newGen}."
+                });
+            }
+            return Ok(new
+            {
+                success = true,
+                published = false,
+                publishError = pubError,
+                server = entry,
+                message = $"OpenVPN server '{entry.Name}' added to registry, but publish failed: {pubError}"
+            });
+        }
+
         return Ok(new
         {
             success = true,
+            published = false,
             server = entry,
-            message = $"OpenVPN server '{entry.Name}' added to registry. Remember to create and publish a new generation to apply changes to clients."
+            message = $"OpenVPN server '{entry.Name}' added to registry. Remember to publish changes to clients."
         });
     }
 

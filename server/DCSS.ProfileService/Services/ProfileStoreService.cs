@@ -40,6 +40,39 @@ public class ActiveGenerationPointer
     public DateTime UpdatedAtUtc { get; set; }
 }
 
+public class PublicationStatusSummary
+{
+    [JsonPropertyName("activeGeneration")]
+    public int ActiveGeneration { get; set; }
+
+    [JsonPropertyName("activePublishedAtUtc")]
+    public DateTime? ActivePublishedAtUtc { get; set; }
+
+    [JsonPropertyName("hasPendingChanges")]
+    public bool HasPendingChanges { get; set; }
+
+    [JsonPropertyName("totalRegistryCount")]
+    public int TotalRegistryCount { get; set; }
+
+    [JsonPropertyName("enabledRegistryCount")]
+    public int EnabledRegistryCount { get; set; }
+
+    [JsonPropertyName("activeGenerationCount")]
+    public int ActiveGenerationCount { get; set; }
+
+    [JsonPropertyName("pendingAdditionsCount")]
+    public int PendingAdditionsCount { get; set; }
+
+    [JsonPropertyName("pendingModificationsCount")]
+    public int PendingModificationsCount { get; set; }
+
+    [JsonPropertyName("pendingDeletionsCount")]
+    public int PendingDeletionsCount { get; set; }
+
+    [JsonPropertyName("pendingChangesSummary")]
+    public List<string> PendingChangesSummary { get; set; } = new();
+}
+
 public class ServerRegistryItem
 {
     [JsonPropertyName("serverId")]
@@ -77,6 +110,15 @@ public class ServerRegistryItem
 
     [JsonPropertyName("credentialSetId")]
     public string? CredentialSetId { get; set; }
+
+    [JsonPropertyName("inActiveGeneration")]
+    public bool InActiveGeneration { get; set; }
+
+    [JsonPropertyName("publicationStatus")]
+    public string PublicationStatus { get; set; } = "NOT_PUBLISHED";
+
+    [JsonPropertyName("activeGeneration")]
+    public int ActiveGeneration { get; set; }
 
     [JsonPropertyName("createdAtUtc")]
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
@@ -142,10 +184,20 @@ public class ProfileStoreService
             LoadServerRegistry();
 
             var pointerPath = Path.Combine(_storageDirectory, "active_generation.json");
-            if (!File.Exists(pointerPath))
+            var activeGen = GetActiveGenerationNumber();
+            if (!File.Exists(pointerPath) || activeGen == 0)
             {
-                _logger.Info("Initializing default server catalog generation 1...");
-                CreateDefaultGeneration();
+                var enabled = _serverRegistry.Values.Where(s => s.Meta.Enabled).ToList();
+                if (enabled.Count > 0)
+                {
+                    _logger.Info($"Initializing active server catalog generation 1 from {enabled.Count} existing registry servers...");
+                    CreateAndPublishNewGeneration("System Initialization");
+                }
+                else
+                {
+                    _logger.Info("Initializing default server catalog generation 1...");
+                    CreateDefaultGeneration();
+                }
             }
         }
     }
@@ -516,15 +568,114 @@ public class ProfileStoreService
 
     public IReadOnlyList<ServerRegistryItem> GetServers(string? protocol = null)
     {
-        var query = _serverRegistry.Values.Select(v => v.Meta);
-
-        if (!string.IsNullOrEmpty(protocol))
+        lock (_lock)
         {
-            var norm = VpnProtocol.Normalize(protocol);
-            query = query.Where(s => string.Equals(s.Protocol, norm, StringComparison.OrdinalIgnoreCase));
-        }
+            var manifest = GetCurrentManifest();
+            var activeGen = GetActiveGenerationNumber();
+            var activeServerIds = manifest?.ProfilePayloads != null ? new HashSet<string>(manifest.ProfilePayloads.Keys) : new HashSet<string>();
+            var pubTime = manifest?.PublishedAtUtc ?? DateTime.MinValue;
 
-        return query.OrderBy(s => s.Name).ToList();
+            var list = new List<ServerRegistryItem>();
+            foreach (var v in _serverRegistry.Values)
+            {
+                var meta = v.Meta;
+                meta.ActiveGeneration = activeGen;
+                if (!meta.Enabled)
+                {
+                    meta.InActiveGeneration = false;
+                    meta.PublicationStatus = "DISABLED";
+                }
+                else if (activeServerIds.Contains(meta.ServerId))
+                {
+                    meta.InActiveGeneration = true;
+                    if (meta.UpdatedAtUtc > pubTime.AddSeconds(1))
+                    {
+                        meta.PublicationStatus = "PENDING_CHANGES";
+                    }
+                    else
+                    {
+                        meta.PublicationStatus = "PUBLISHED";
+                    }
+                }
+                else
+                {
+                    meta.InActiveGeneration = false;
+                    meta.PublicationStatus = "NOT_PUBLISHED";
+                }
+                list.Add(meta);
+            }
+
+            var query = list.AsEnumerable();
+            if (!string.IsNullOrEmpty(protocol))
+            {
+                var norm = VpnProtocol.Normalize(protocol);
+                query = query.Where(s => string.Equals(s.Protocol, norm, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return query.OrderBy(s => s.Name).ToList();
+        }
+    }
+
+    public PublicationStatusSummary GetPublicationStatus()
+    {
+        lock (_lock)
+        {
+            var activeGen = GetActiveGenerationNumber();
+            var manifest = GetCurrentManifest();
+            var activeServerIds = manifest?.ProfilePayloads != null ? new HashSet<string>(manifest.ProfilePayloads.Keys) : new HashSet<string>();
+            var publishedAtUtc = manifest?.PublishedAtUtc;
+
+            var enabledServers = _serverRegistry.Values.Where(s => s.Meta.Enabled).ToList();
+            var pendingAdditions = enabledServers.Where(s => !activeServerIds.Contains(s.Meta.ServerId)).ToList();
+            var pendingDeletions = activeServerIds.Where(id => !_serverRegistry.TryGetValue(id, out var r) || !r.Meta.Enabled).ToList();
+
+            var pendingModifications = new List<ServerRegistryItem>();
+            if (publishedAtUtc.HasValue)
+            {
+                var pubTime = publishedAtUtc.Value;
+                foreach (var s in enabledServers.Where(s => activeServerIds.Contains(s.Meta.ServerId)))
+                {
+                    if (s.Meta.UpdatedAtUtc > pubTime.AddSeconds(1))
+                    {
+                        pendingModifications.Add(s.Meta);
+                    }
+                }
+            }
+
+            var summary = new List<string>();
+            foreach (var a in pendingAdditions)
+            {
+                summary.Add($"+ Added: {a.Meta.Name} ({a.Meta.Protocol} - {a.Meta.Provider})");
+            }
+            foreach (var m in pendingModifications)
+            {
+                summary.Add($"~ Modified: {m.Name} ({m.Protocol} - {m.Provider})");
+            }
+            foreach (var d in pendingDeletions)
+            {
+                var name = _serverRegistry.TryGetValue(d, out var item) ? item.Meta.Name : d;
+                summary.Add($"- Removed/Disabled: {name}");
+            }
+
+            var hasChanges = (activeGen == 0 && enabledServers.Count > 0) ||
+                             pendingAdditions.Count > 0 ||
+                             pendingDeletions.Count > 0 ||
+                             pendingModifications.Count > 0;
+
+            return new PublicationStatusSummary
+            {
+                ActiveGeneration = activeGen,
+                ActivePublishedAtUtc = publishedAtUtc,
+                HasPendingChanges = hasChanges,
+                TotalRegistryCount = _serverRegistry.Count,
+                EnabledRegistryCount = enabledServers.Count,
+                ActiveGenerationCount = activeServerIds.Count,
+                PendingAdditionsCount = pendingAdditions.Count,
+                PendingModificationsCount = pendingModifications.Count,
+                PendingDeletionsCount = pendingDeletions.Count,
+                PendingChangesSummary = summary
+            };
+        }
     }
 
     public ServerRegistryItem? GetServerById(string serverId)
@@ -694,6 +845,38 @@ public class ProfileStoreService
                 if (enabledServers.Count == 0)
                 {
                     return (false, "Cannot create generation with 0 enabled servers.", 0);
+                }
+
+                // Pre-publication validation
+                foreach (var s in enabledServers)
+                {
+                    if (VpnProtocol.IsOpenVpn(s.Meta.Protocol))
+                    {
+                        if (s.Profile.Openvpn == null || s.Profile.Openvpn.RemoteEndpoints.Count == 0)
+                        {
+                            return (false, $"Validation failed: OpenVPN server '{s.Meta.Name}' has no remote endpoints configured.", 0);
+                        }
+
+                        var credId = !string.IsNullOrEmpty(s.Profile.Openvpn.CredentialSetId)
+                            ? s.Profile.Openvpn.CredentialSetId
+                            : s.Meta.CredentialSetId;
+
+                        if (!string.IsNullOrEmpty(credId) && _credentialSetService != null)
+                        {
+                            var cred = _credentialSetService.GetById(credId);
+                            if (cred == null)
+                            {
+                                return (false, $"Validation failed: OpenVPN server '{s.Meta.Name}' is linked to missing Credential Set '{credId}'.", 0);
+                            }
+                        }
+                    }
+                    else if (VpnProtocol.IsWireGuard(s.Meta.Protocol))
+                    {
+                        if (s.Profile.Wireguard == null || string.IsNullOrWhiteSpace(s.Profile.Wireguard.Endpoint))
+                        {
+                            return (false, $"Validation failed: WireGuard server '{s.Meta.Name}' has no endpoint configured.", 0);
+                        }
+                    }
                 }
 
                 var currentGen = GetActiveGenerationNumber();

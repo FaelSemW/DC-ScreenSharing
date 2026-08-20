@@ -35,9 +35,14 @@ public class ClientController : ControllerBase
     {
         var headerCaps = Request.Headers["X-Client-Capabilities"].ToString();
         var queryCaps = Request.Query["capabilities"].ToString();
-        var combined = $"{headerCaps},{queryCaps}".ToLowerInvariant();
+        var userAgent = Request.Headers["User-Agent"].ToString();
+        var combined = $"{headerCaps},{queryCaps},{userAgent}".ToLowerInvariant();
 
-        return combined.Contains("openvpn-v1") || combined.Contains("openvpn");
+        return combined.Contains("openvpn-v1") ||
+               combined.Contains("openvpn") ||
+               combined.Contains("ovpn") ||
+               combined.Contains("v1.0.7") ||
+               combined.Contains("1.0.7");
     }
 
     [HttpGet("health")]
@@ -106,7 +111,15 @@ public class ClientController : ControllerBase
     {
         var catalog = _store.GetCurrentCatalog();
         if (catalog == null)
-            return NotFound(new { error = "No active server catalog available." });
+        {
+            return Ok(new ServerCatalog
+            {
+                Schema = 1,
+                Generation = 0,
+                PublishedAtUtc = DateTime.UtcNow,
+                Servers = new List<ServerEntry>()
+            });
+        }
 
         var supportsOvpn = ClientSupportsOpenVpn();
         if (!supportsOvpn)

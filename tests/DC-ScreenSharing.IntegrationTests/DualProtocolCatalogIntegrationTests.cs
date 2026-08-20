@@ -238,4 +238,105 @@ MIIProtonCA...
         Assert.DoesNotContain("ProtonSecretPassword!", catalogRaw);
         Assert.DoesNotContain("aGVsbG93b3JsZHByaXZhdGVrZXkxMjM0NTY3ODkwMTI=", catalogRaw);
     }
+
+    [Fact]
+    public async Task PublicationStatus_TracksPendingChangesAccurately()
+    {
+        await AuthenticateAdminAsync();
+
+        // 1. Check publication status endpoint
+        var statusResp = await _client.GetAsync("/api/v1/admin/servers/publication-status");
+        Assert.True(statusResp.IsSuccessStatusCode);
+        var status = await statusResp.Content.ReadFromJsonAsync<PublicationStatusSummary>();
+        Assert.NotNull(status);
+
+        // 2. Add an OpenVPN server without publishing
+        var ovpnContent = @"
+client
+dev tun
+proto udp
+remote 198.51.100.1 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+cipher AES-256-GCM
+auth SHA256
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIFakeCert...
+-----END CERTIFICATE-----
+</ca>
+";
+        var addResp = await _client.PostAsJsonAsync("/api/v1/admin/servers/openvpn", new AddOpenVpnServerRequest
+        {
+            DisplayName = "Test Unpublished OVPN",
+            Country = "Germany",
+            CountryCode = "DE",
+            Region = "Europe",
+            Provider = "VPNBook",
+            OvpnContent = ovpnContent,
+            PublishImmediately = false
+        });
+        Assert.True(addResp.IsSuccessStatusCode);
+
+        // 3. Status should indicate pending changes
+        var updatedStatusResp = await _client.GetAsync("/api/v1/admin/servers/publication-status");
+        var updatedStatus = await updatedStatusResp.Content.ReadFromJsonAsync<PublicationStatusSummary>();
+        Assert.NotNull(updatedStatus);
+        Assert.True(updatedStatus.HasPendingChanges);
+        Assert.True(updatedStatus.PendingAdditionsCount > 0);
+
+        // 4. Verify GetServers decorates item with publication status
+        var serversResp = await _client.GetAsync("/api/v1/admin/servers");
+        var servers = await serversResp.Content.ReadFromJsonAsync<List<ServerRegistryItem>>();
+        Assert.NotNull(servers);
+        var unpubServer = servers.FirstOrDefault(s => s.Name == "Test Unpublished OVPN");
+        Assert.NotNull(unpubServer);
+        Assert.Equal("NOT_PUBLISHED", unpubServer.PublicationStatus);
+    }
+
+    [Fact]
+    public async Task AddServer_WithPublishImmediately_PublishesNewGenerationAtomically()
+    {
+        await AuthenticateAdminAsync();
+
+        var ovpnContent = @"
+client
+dev tun
+proto udp
+remote 203.0.113.5 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+cipher AES-256-GCM
+auth SHA256
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIFakeCert...
+-----END CERTIFICATE-----
+</ca>
+";
+        var addResp = await _client.PostAsJsonAsync("/api/v1/admin/servers/openvpn", new AddOpenVpnServerRequest
+        {
+            DisplayName = "Atomic Publish Server",
+            Country = "Canada",
+            CountryCode = "CA",
+            Region = "North America",
+            Provider = "Proton",
+            OvpnContent = ovpnContent,
+            PublishImmediately = true
+        });
+        Assert.True(addResp.IsSuccessStatusCode);
+
+        // Verify catalog immediately contains this server
+        var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/catalog");
+        req.Headers.Add("X-Client-Capabilities", "wireguard-v1,openvpn-v1");
+        var catalogResp = await _client.SendAsync(req);
+        Assert.True(catalogResp.IsSuccessStatusCode);
+        var catalog = await catalogResp.Content.ReadFromJsonAsync<ServerCatalog>();
+        Assert.NotNull(catalog);
+        Assert.Contains(catalog.Servers, s => s.Name == "Atomic Publish Server");
+    }
 }

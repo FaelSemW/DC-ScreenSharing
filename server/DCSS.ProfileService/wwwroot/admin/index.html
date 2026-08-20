@@ -102,9 +102,10 @@
                             <textarea id="server-conf-text" class="form-control code-editor mt-2" rows="6" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = 10.2.0.2/32&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = us-east.vpn.net:51820" required></textarea>
                             <small class="form-text text-muted">The private key is securely stored server-side and never returned to browser.</small>
                         </div>
-                        <div class="modal-footer px-0 pb-0">
+                        <div class="modal-footer px-0 pb-0" style="display: flex; justify-content: flex-end; gap: 8px;">
                             <button type="button" class="btn btn-secondary" onclick="closeAddServerModal()">Cancel</button>
-                            <button type="submit" class="btn btn-primary" id="submit-add-server-btn">Add to Registry</button>
+                            <button type="button" class="btn btn-secondary" id="submit-add-server-save-btn" onclick="submitWireGuardForm(false)">Save Only</button>
+                            <button type="button" class="btn btn-primary" id="submit-add-server-publish-btn" onclick="submitWireGuardForm(true)">Save & Publish</button>
                         </div>
                     </form>
                 </div>
@@ -199,9 +200,10 @@
                             <div id="val-error-msg" class="alert alert-danger mt-2 hidden"></div>
                         </div>
 
-                        <div class="modal-footer px-0 pb-0">
+                        <div class="modal-footer px-0 pb-0" style="display: flex; justify-content: flex-end; gap: 8px;">
                             <button type="button" class="btn btn-secondary" onclick="closeAddOpenVpnModal()">Cancel</button>
-                            <button type="submit" class="btn btn-primary" id="submit-add-ovpn-btn">Add to Registry</button>
+                            <button type="button" class="btn btn-secondary" id="submit-add-ovpn-save-btn" onclick="submitOpenVpnForm(false)">Save Only</button>
+                            <button type="button" class="btn btn-primary" id="submit-add-ovpn-publish-btn" onclick="submitOpenVpnForm(true)">Save & Publish</button>
                         </div>
                     </form>
                 </div>
@@ -528,6 +530,17 @@
 
                     <!-- SECTION: SERVERS (DUAL PROTOCOL: WIREGUARD + OPENVPN) -->
                     <section id="section-servers" class="page-section hidden">
+                        <!-- Publication Banner (when changes are pending) -->
+                        <div id="servers-publish-banner" class="alert alert-warning mb-3 hidden" style="display: flex; justify-content: space-between; align-items: center; border-left: 4px solid #F59E0B; background: rgba(245, 158, 11, 0.12); padding: 12px 16px; border-radius: 6px;">
+                            <div>
+                                <strong style="color: #FCD34D;">⚡ Unpublished Server Changes:</strong>
+                                <span id="servers-publish-summary-text" style="margin-left: 6px; color: #F1F5F9;">Changes in server registry are not yet live for clients.</span>
+                            </div>
+                            <button class="btn btn-primary btn-sm" onclick="promptPublishChanges()" style="background: #F59E0B; border-color: #D97706; color: #000; font-weight: bold;">
+                                Publish Changes Now
+                            </button>
+                        </div>
+
                         <!-- Dual Protocol Top Tabs -->
                         <div class="protocol-tabs">
                             <button class="protocol-tab active" id="tab-btn-wireguard" onclick="switchProtocolTab('WIREGUARD')">
@@ -541,16 +554,24 @@
                         <!-- WireGuard Toolbar -->
                         <div id="wg-toolbar" class="section-toolbar">
                             <span class="toolbar-info">WireGuard Server Profiles (.conf)</span>
-                            <button class="btn btn-primary" onclick="openAddServerModal()">
-                                <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                                Add WireGuard Server
-                            </button>
+                            <div class="toolbar-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                <button class="btn btn-secondary btn-publish-changes hidden" id="wg-publish-btn" onclick="promptPublishChanges()">
+                                    ⚡ Publish Changes
+                                </button>
+                                <button class="btn btn-primary" onclick="openAddServerModal()">
+                                    <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                                    Add WireGuard Server
+                                </button>
+                            </div>
                         </div>
 
                         <!-- OpenVPN Toolbar -->
                         <div id="ovpn-toolbar" class="section-toolbar hidden">
                             <span class="toolbar-info">OpenVPN Client Profiles (.ovpn)</span>
                             <div class="toolbar-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                <button class="btn btn-secondary btn-publish-changes hidden" id="ovpn-publish-btn" onclick="promptPublishChanges()">
+                                    ⚡ Publish Changes
+                                </button>
                                 <button class="btn btn-secondary" onclick="openCredentialSetsModal()">
                                     <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
                                     Manage Credentials
@@ -575,11 +596,27 @@
 
                     <!-- SECTION: GENERATIONS -->
                     <section id="section-generations" class="page-section hidden">
+                        <!-- Active Generation Hero Card -->
+                        <div id="generations-active-hero" class="card mb-3 p-3" style="background: linear-gradient(135deg, rgba(88, 101, 242, 0.15), rgba(16, 185, 129, 0.1)); border-color: rgba(88, 101, 242, 0.3);">
+                            <div class="loading-state">Loading active generation details...</div>
+                        </div>
+
+                        <!-- Pending Registry Changes Box -->
+                        <div id="generations-pending-box" class="card mb-3 p-3 hidden" style="border-color: #F59E0B; background: rgba(245, 158, 11, 0.08);">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h4 style="margin: 0; color: #FCD34D; font-size: 14px;">⚡ Pending Server Registry Changes</h4>
+                                <button class="btn btn-primary btn-sm" onclick="promptPublishChanges()" style="background: #F59E0B; border-color: #D97706; color: #000; font-weight: bold;">
+                                    Create &amp; Publish Generation
+                                </button>
+                            </div>
+                            <div id="generations-pending-list" style="font-size: 12px; line-height: 1.6; color: #E2E8F0;"></div>
+                        </div>
+
                         <div class="section-toolbar">
-                            <span class="toolbar-info">Signed Catalog Generations</span>
-                            <button class="btn btn-accent" onclick="handleCompileAndPublishGeneration()">
+                            <span class="toolbar-info">Catalog Generations History</span>
+                            <button class="btn btn-accent" onclick="promptPublishChanges()">
                                 <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
-                                Compile & Publish New Generation
+                                Compile &amp; Publish New Generation
                             </button>
                         </div>
 
@@ -647,6 +684,6 @@
     </div>
 
     <!-- Script with Dynamic Cache Busting -->
-    <script src="/admin/admin.js?t=1724176000"></script>
+    <script src="/admin/admin.js?t=1724185000"></script>
 </body>
 </html>

@@ -59,10 +59,22 @@ public class ProfileRotationCoordinator
     {
         try
         {
-            var catalogUrl = $"{_serviceBaseUrl}/api/v1/catalog";
+            var catalogUrl = $"{_serviceBaseUrl}/api/v1/catalog?capabilities=wireguard-v1,openvpn-v1";
             _logger.Info($"Fetching server catalog from {catalogUrl}...");
-            var response = await _httpClient.GetStringAsync(catalogUrl, ct);
 
+            using var request = new HttpRequestMessage(HttpMethod.Get, catalogUrl);
+            request.Headers.Add("X-Client-Capabilities", "wireguard-v1, openvpn-v1");
+
+            using var responseMsg = await _httpClient.SendAsync(request, ct);
+            if (!responseMsg.IsSuccessStatusCode)
+            {
+                _logger.Warning($"Could not retrieve remote server catalog: HTTP {responseMsg.StatusCode}");
+                return null;
+            }
+
+            var response = await responseMsg.Content.ReadAsStringAsync(ct);
+
+            ServerCatalog? catalog = null;
             if (response.Contains("signatureBase64") && response.Contains("catalogJson"))
             {
                 var manifest = JsonSerializer.Deserialize<SignedManifest>(response);
@@ -78,14 +90,19 @@ public class ProfileRotationCoordinator
                         }
                     }
 
-                    return JsonSerializer.Deserialize<ServerCatalog>(manifest.CatalogJson);
+                    catalog = JsonSerializer.Deserialize<ServerCatalog>(manifest.CatalogJson);
                 }
             }
+            else
+            {
+                catalog = JsonSerializer.Deserialize<ServerCatalog>(response);
+            }
 
-            var catalog = JsonSerializer.Deserialize<ServerCatalog>(response);
             if (catalog != null)
             {
-                _logger.Info($"Retrieved catalog generation {catalog.Generation} with {catalog.Servers.Count} servers.");
+                var wgCount = catalog.Servers.Count(s => VpnProtocol.IsWireGuard(s.Protocol));
+                var ovpnCount = catalog.Servers.Count(s => VpnProtocol.IsOpenVpn(s.Protocol));
+                _logger.Info($"Catalog generation: {catalog.Generation} | Total servers: {catalog.Servers.Count} | WireGuard: {wgCount} | OpenVPN: {ovpnCount}");
             }
             return catalog;
         }
@@ -213,7 +230,9 @@ public class ProfileRotationCoordinator
             };
 
             var jsonContent = new StringContent(JsonSerializer.Serialize(acquireReq), Encoding.UTF8, "application/json");
-            var resp = await _httpClient.PostAsync(profileUrl, jsonContent, ct);
+            using var reqMsg = new HttpRequestMessage(HttpMethod.Post, profileUrl) { Content = jsonContent };
+            reqMsg.Headers.Add("X-Client-Capabilities", "wireguard-v1, openvpn-v1");
+            var resp = await _httpClient.SendAsync(reqMsg, ct);
 
             if (!resp.IsSuccessStatusCode)
             {

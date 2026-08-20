@@ -75,10 +75,31 @@ public class MainViewModel : INotifyPropertyChanged
     private string _updateTitle = string.Empty;
     private string _updateStatusText = string.Empty;
     private bool _isUpdating;
-    private int _updateProgress;
-    private UpdateCheckResult? _pendingUpdateInfo;
+    // Server Catalog State
+    private bool _isLoadingServers;
+    private string? _serverCatalogError;
 
     public ObservableCollection<ServerEntry> Servers { get; } = new();
+
+    public bool HasNoServers => IsActivated && !IsLoadingServers && Servers.Count == 0;
+
+    public bool IsLoadingServers
+    {
+        get => _isLoadingServers;
+        set
+        {
+            if (SetProperty(ref _isLoadingServers, value))
+            {
+                OnPropertyChanged(nameof(HasNoServers));
+            }
+        }
+    }
+
+    public string? ServerCatalogError
+    {
+        get => _serverCatalogError;
+        set => SetProperty(ref _serverCatalogError, value);
+    }
 
     public bool IsActivated
     {
@@ -330,6 +351,8 @@ public class MainViewModel : INotifyPropertyChanged
     {
         try
         {
+            IsLoadingServers = true;
+            ServerCatalogError = null;
             var catalog = await _profileCoordinator.FetchRemoteCatalogAsync();
             Servers.Clear();
 
@@ -349,10 +372,21 @@ public class MainViewModel : INotifyPropertyChanged
             {
                 SelectedServer = Servers.FirstOrDefault();
             }
+
+            if (Servers.Count == 0)
+            {
+                ServerCatalogError = "No servers available.\nPossible reasons:\n• No active server generation has been published\n• No compatible servers are available for this client";
+            }
         }
         catch (Exception ex)
         {
             _logger.Warning($"Could not refresh server catalog: {ex.Message}");
+            ServerCatalogError = "Unable to load servers from ProfileService.";
+        }
+        finally
+        {
+            IsLoadingServers = false;
+            OnPropertyChanged(nameof(HasNoServers));
         }
     }
 

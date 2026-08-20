@@ -12,6 +12,7 @@ let currentProtocolTab = 'WIREGUARD';
 let keyFilterMode = 'all';
 let validationDebounceTimer = null;
 let bulkFilesToImport = [];
+let currentPublicationStatus = null;
 
 const sectionTitles = {
     'dashboard': 'Dashboard',
@@ -603,8 +604,12 @@ async function loadServers() {
     container.innerHTML = '<div class="loading-state">Loading servers...</div>';
 
     try {
-        const res = await apiFetch('/api/v1/admin/servers');
-        currentServersList = await res.json();
+        const [serversRes, statusRes] = await Promise.all([
+            apiFetch('/api/v1/admin/servers'),
+            apiFetch('/api/v1/admin/servers/publication-status')
+        ]);
+        currentServersList = await serversRes.json();
+        currentPublicationStatus = await statusRes.json();
 
         // Update protocol count badges
         const wgCount = (currentServersList || []).filter(s => (s.protocol || 'WIREGUARD').toUpperCase() === 'WIREGUARD').length;
@@ -615,6 +620,31 @@ async function loadServers() {
 
         const ovpnBadge = document.getElementById('ovpn-count-badge');
         if (ovpnBadge) ovpnBadge.textContent = ovpnCount;
+
+        // Update Publication Status Banner & Publish Buttons
+        const banner = document.getElementById('servers-publish-banner');
+        const summaryText = document.getElementById('servers-publish-summary-text');
+        const wgPubBtn = document.getElementById('wg-publish-btn');
+        const ovpnPubBtn = document.getElementById('ovpn-publish-btn');
+
+        if (currentPublicationStatus && currentPublicationStatus.hasPendingChanges) {
+            const pendingCount = (currentPublicationStatus.pendingAdditionsCount || 0) +
+                                 (currentPublicationStatus.pendingModificationsCount || 0) +
+                                 (currentPublicationStatus.pendingDeletionsCount || 0);
+            if (banner) {
+                banner.classList.remove('hidden');
+                if (summaryText) {
+                    const genText = currentPublicationStatus.activeGeneration > 0 ? `Active Generation #${currentPublicationStatus.activeGeneration}` : 'No Active Generation';
+                    summaryText.textContent = `${pendingCount} unpublished registry changes differ from ${genText}.`;
+                }
+            }
+            if (wgPubBtn) wgPubBtn.classList.remove('hidden');
+            if (ovpnPubBtn) ovpnPubBtn.classList.remove('hidden');
+        } else {
+            if (banner) banner.classList.add('hidden');
+            if (wgPubBtn) wgPubBtn.classList.add('hidden');
+            if (ovpnPubBtn) ovpnPubBtn.classList.add('hidden');
+        }
 
         renderServers();
     } catch (e) {
@@ -651,12 +681,25 @@ function renderServers() {
                                            provider.toLowerCase().includes('vpnbook') ? 'badge-vpnbook' : 'badge-custom';
                 const serverId = s.id || s.serverId || 'srv';
 
+                // Publication Status Badge
+                let pubBadge = '';
+                if (s.publicationStatus === 'PUBLISHED') {
+                    pubBadge = `<span class="badge badge-active" title="Included in Active Generation #${s.activeGeneration}">Active Gen #${s.activeGeneration}</span>`;
+                } else if (s.publicationStatus === 'PENDING_CHANGES') {
+                    pubBadge = `<span class="badge badge-warning" style="background: rgba(245, 158, 11, 0.2); color: #FCD34D; border: 1px solid #F59E0B;" title="Modified since last publication">Unpublished Changes</span>`;
+                } else if (s.publicationStatus === 'NOT_PUBLISHED') {
+                    pubBadge = `<span class="badge badge-warning" style="background: rgba(245, 158, 11, 0.2); color: #FCD34D; border: 1px solid #F59E0B;" title="Not included in active generation">Not in Active Gen</span>`;
+                } else {
+                    pubBadge = `<span class="badge badge-expired">Disabled</span>`;
+                }
+
                 return `
                     <div class="list-row">
                         <div class="row-main">
                             <div class="row-title-line">
                                 <span class="row-title">${escapeHtml(s.name)}</span>
                                 <span class="badge ${s.enabled ? 'badge-active' : 'badge-expired'}">${s.enabled ? 'Enabled' : 'Disabled'}</span>
+                                ${pubBadge}
                                 <span class="badge ${isOvpn ? 'badge-warning' : 'badge-accent'}">${isOvpn ? '🔒 OpenVPN' : '⚡ WireGuard'}</span>
                                 <span class="badge ${providerBadgeClass}">${escapeHtml(provider)}</span>
                                 <span class="badge badge-single">${escapeHtml(s.countryCode || s.country || 'Global')}</span>
@@ -692,6 +735,7 @@ function openAddServerModal() {
     document.getElementById('server-display-name').value = '';
     document.getElementById('server-country').value = 'US';
     document.getElementById('server-region').value = '';
+    document.getElementById('server-provider').value = 'Custom';
     document.getElementById('server-conf-text').value = '';
     document.getElementById('server-conf-file').value = '';
 }
@@ -711,22 +755,35 @@ function handleConfFileSelect(e) {
     reader.readAsText(file);
 }
 
-async function handleAddServer(e) {
-    e.preventDefault();
-    const btn = document.getElementById('submit-add-server-btn');
-    btn.disabled = true;
-    btn.textContent = 'Parsing & Adding...';
-
+async function submitWireGuardForm(publishImmediately) {
     const displayName = document.getElementById('server-display-name').value.trim();
     const country = document.getElementById('server-country').value.trim();
     const region = document.getElementById('server-region').value.trim();
+    const provider = document.getElementById('server-provider').value.trim() || 'Custom';
     const confContent = document.getElementById('server-conf-text').value.trim();
+
+    if (!displayName || !country || !confContent) {
+        showToast('Please fill in all required fields.', 'danger');
+        return;
+    }
+
+    if (publishImmediately) {
+        if (!confirm('Save WireGuard server and immediately compile & publish a new generation to all active clients?')) {
+            return;
+        }
+    }
+
+    const btn = publishImmediately ? document.getElementById('submit-add-server-publish-btn') : document.getElementById('submit-add-server-save-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = publishImmediately ? 'Saving & Publishing...' : 'Saving...';
+    }
 
     try {
         const res = await apiFetch('/api/v1/admin/servers', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ displayName, country, region, confContent })
+            body: JSON.stringify({ displayName, country, region, provider, confContent, publishImmediately })
         });
 
         const data = await res.json();
@@ -734,6 +791,7 @@ async function handleAddServer(e) {
             closeAddServerModal();
             showToast(data.message || 'WireGuard server added.', 'success');
             loadServers();
+            loadGenerations();
             loadDashboard();
         } else {
             showToast(data.error || 'Failed to add server.', 'danger');
@@ -741,8 +799,10 @@ async function handleAddServer(e) {
     } catch (err) {
         showToast('Error adding WireGuard server.', 'danger');
     } finally {
-        btn.disabled = false;
-        btn.textContent = 'Add to Registry';
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = publishImmediately ? 'Save & Publish' : 'Save Only';
+        }
     }
 }
 
@@ -926,12 +986,7 @@ function validateOvpnLive(isManual = false) {
     }
 }
 
-async function handleAddOpenVpnServer(e) {
-    e.preventDefault();
-    const btn = document.getElementById('submit-add-ovpn-btn');
-    btn.disabled = true;
-    btn.textContent = 'Validating & Importing...';
-
+async function submitOpenVpnForm(publishImmediately) {
     const displayName = document.getElementById('ovpn-display-name').value.trim();
     const country = document.getElementById('ovpn-country').value.trim();
     const countryCode = document.getElementById('ovpn-country-code').value.trim();
@@ -941,6 +996,23 @@ async function handleAddOpenVpnServer(e) {
     const username = document.getElementById('ovpn-username').value.trim() || null;
     const password = document.getElementById('ovpn-password').value || null;
     const ovpnContent = document.getElementById('ovpn-file-text').value.trim();
+
+    if (!displayName || !country || !countryCode || !ovpnContent) {
+        showToast('Please fill in all required fields.', 'danger');
+        return;
+    }
+
+    if (publishImmediately) {
+        if (!confirm('Save OpenVPN server and immediately compile & publish a new generation to all active clients?')) {
+            return;
+        }
+    }
+
+    const btn = publishImmediately ? document.getElementById('submit-add-ovpn-publish-btn') : document.getElementById('submit-add-ovpn-save-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = publishImmediately ? 'Validating & Publishing...' : 'Validating & Saving...';
+    }
 
     try {
         const res = await apiFetch('/api/v1/admin/servers/openvpn', {
@@ -956,15 +1028,17 @@ async function handleAddOpenVpnServer(e) {
                 credentialSetId,
                 username,
                 password,
-                ovpnContent
+                ovpnContent,
+                publishImmediately
             })
         });
 
         const data = await res.json();
         if (res.ok && data.success) {
             closeAddOpenVpnModal();
-            showToast(data.message || 'OpenVPN server imported.', 'success');
+            showToast(data.message || 'OpenVPN server added.', 'success');
             loadServers();
+            loadGenerations();
             loadDashboard();
             switchProtocolTab('OPENVPN');
         } else {
@@ -973,8 +1047,10 @@ async function handleAddOpenVpnServer(e) {
     } catch (err) {
         showToast('Error importing OpenVPN profile.', 'danger');
     } finally {
-        btn.disabled = false;
-        btn.textContent = 'Add to Registry';
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = publishImmediately ? 'Save & Publish' : 'Save Only';
+        }
     }
 }
 
@@ -1270,12 +1346,65 @@ async function promptDeleteServer(id, name) {
 
 async function loadGenerations() {
     const container = document.getElementById('generations-container');
+    const hero = document.getElementById('generations-active-hero');
+    const pendingBox = document.getElementById('generations-pending-box');
+    const pendingList = document.getElementById('generations-pending-list');
+
     if (!container) return;
     container.innerHTML = '<div class="loading-state">Loading generations...</div>';
 
     try {
-        const res = await apiFetch('/api/v1/admin/generations');
-        const list = await res.json();
+        const [genRes, statusRes] = await Promise.all([
+            apiFetch('/api/v1/admin/generations'),
+            apiFetch('/api/v1/admin/servers/publication-status')
+        ]);
+        const list = await genRes.json();
+        const status = await statusRes.json();
+
+        // Update Active Generation Hero Card
+        if (hero) {
+            if (status.activeGeneration > 0) {
+                hero.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                        <div>
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                <span style="font-size: 18px; font-weight: bold; color: #F8FAFC;">Active Generation #${status.activeGeneration}</span>
+                                <span class="badge badge-active">ACTIVE</span>
+                            </div>
+                            <div style="font-size: 12px; color: #94A3B8;">
+                                Published: <strong>${status.activePublishedAtUtc ? formatDate(status.activePublishedAtUtc) : 'N/A'}</strong> |
+                                Total Active Servers: <strong>${status.activeGenerationCount}</strong>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary btn-sm" onclick="promptPublishChanges()" style="background: #10B981; border-color: #059669;">
+                            ⚡ Publish New Generation
+                        </button>
+                    </div>
+                `;
+            } else {
+                hero.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                        <div>
+                            <span style="font-size: 16px; font-weight: bold; color: #F8FAFC;">No Active Generation Published</span>
+                            <div style="font-size: 12px; color: #FCD34D;">Clients currently receive zero servers. Publish a generation to make servers available.</div>
+                        </div>
+                        <button class="btn btn-primary btn-sm" onclick="promptPublishChanges()">
+                            ⚡ Publish Initial Generation
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        // Update Pending Changes Box
+        if (pendingBox && pendingList) {
+            if (status.hasPendingChanges) {
+                pendingBox.classList.remove('hidden');
+                pendingList.innerHTML = (status.pendingChangesSummary || []).map(item => `<div style="padding: 2px 0;">${escapeHtml(item)}</div>`).join('');
+            } else {
+                pendingBox.classList.add('hidden');
+            }
+        }
 
         if (!list || list.length === 0) {
             container.innerHTML = '<div class="empty-state">No signed catalog generations found. Click "Compile & Publish New Generation" to publish.</div>';
@@ -1313,22 +1442,27 @@ async function loadGenerations() {
     }
 }
 
-async function handleCompileAndPublishGeneration() {
-    if (!confirm('Compile and publish a new signed catalog generation now? All active clients will receive this generation on next check-in.')) return;
+async function promptPublishChanges() {
+    if (!confirm('Publish server changes?\n\nThis will create a new signed profile generation and make it active for compatible clients.')) return;
 
     try {
         const res = await apiFetch('/api/v1/admin/generations', { method: 'POST' });
         const data = await res.json();
         if (res.ok && data.success) {
-            showToast(data.message || 'Generation published.', 'success');
+            showToast(data.message || `Generation #${data.generation} published successfully.`, 'success');
+            loadServers();
             loadGenerations();
             loadDashboard();
         } else {
-            showToast(data.error || 'Generation compile failed.', 'danger');
+            showToast(data.error || 'Failed to publish generation.', 'danger');
         }
     } catch {
         showToast('Error publishing generation.', 'danger');
     }
+}
+
+async function handleCompileAndPublishGeneration() {
+    await promptPublishChanges();
 }
 
 async function rollbackToGeneration(genNumber) {
