@@ -3,6 +3,7 @@ bin/
 obj/
 dist/
 runtimes/
+tools/railway/
 
 ## Local Production & Sensitive Configuration
 configs/
