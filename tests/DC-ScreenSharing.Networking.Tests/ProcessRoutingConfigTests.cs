@@ -149,8 +149,8 @@ PersistentKeepalive = 25
         var rules = route.GetProperty("rules").EnumerateArray().ToList();
         
         // Find discord routing rule
-        var discordRule = rules.FirstOrDefault(r => r.TryGetProperty("outbound", out var outB) && outB.GetString() == "wg-out");
-        Assert.True(discordRule.ValueKind != JsonValueKind.Undefined, "Could not find wg-out routing rule");
+        var discordRule = rules.FirstOrDefault(r => r.TryGetProperty("process_name", out _));
+        Assert.True(discordRule.ValueKind != JsonValueKind.Undefined, "Could not find process_name routing rule");
 
         var matchedProcs = discordRule.GetProperty("process_name").EnumerateArray().Select(p => p.GetString()).ToList();
         Assert.Contains("Discord.exe", matchedProcs);

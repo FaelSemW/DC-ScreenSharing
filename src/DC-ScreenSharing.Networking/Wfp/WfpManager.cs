@@ -44,8 +44,29 @@ public class WfpManager : IDisposable
         }
 
         _logger.Info("WFP engine dynamic session opened successfully.");
+        EnsureDriverServiceRunning();
         EnsureProviderAndSublayer();
         return true;
+    }
+
+    private void EnsureDriverServiceRunning()
+    {
+        try
+        {
+            using var sc = new System.ServiceProcess.ServiceController("DCSS.WfpCallout");
+            if (sc.Status != System.ServiceProcess.ServiceControllerStatus.Running &&
+                sc.Status != System.ServiceProcess.ServiceControllerStatus.StartPending)
+            {
+                _logger.Info("Starting DCSS.WfpCallout kernel driver service...");
+                sc.Start();
+                sc.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Running, TimeSpan.FromSeconds(5));
+                _logger.Info("DCSS.WfpCallout kernel driver service started.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Debug($"Driver service check: {ex.Message}");
+        }
     }
 
     private void EnsureProviderAndSublayer()

@@ -8,7 +8,7 @@ DriverVer   = 08/20/2026,1.0.0.1
 PnpLockdown = 1
 
 [DestinationDirs]
-DefaultDestDir = 12 ; %windir%\system32\drivers
+DefaultDestDir = 13 ; Driver Store (DIRID 13)
 
 [SourceDisksNames.amd64]
 1 = %DiskName%,,,""
@@ -31,7 +31,7 @@ Description    = %ServiceDesc%
 ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
 StartType      = 3               ; SERVICE_DEMAND_START
 ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
-ServiceBinary  = %12%\DCSS.WfpCallout.sys
+ServiceBinary  = %13%\DCSS.WfpCallout.sys
 LoadOrderGroup = NDIS
 
 [Strings]

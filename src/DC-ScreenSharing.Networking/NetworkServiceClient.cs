@@ -125,20 +125,23 @@ public class NetworkServiceClient
         }
     }
 
-    private async Task<bool> AttemptStartServiceAsync(ServiceController sc)
+    private Task<bool> AttemptStartServiceAsync(ServiceController sc)
     {
-        try
+        return Task.Run(() =>
         {
-            sc.Refresh();
-            if (sc.Status == ServiceControllerStatus.Running) return true;
-            sc.Start();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.Warning($"AttemptStartServiceAsync failed: {ex.Message}");
-            return false;
-        }
+            try
+            {
+                sc.Refresh();
+                if (sc.Status == ServiceControllerStatus.Running) return true;
+                sc.Start();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"AttemptStartServiceAsync failed: {ex.Message}");
+                return false;
+            }
+        });
     }
 
     private async Task<bool> AttemptRestartServiceAsync(ServiceController sc)
