@@ -409,7 +409,7 @@ public class MainViewModel : INotifyPropertyChanged
                 return;
             }
 
-            // Step 3: Preparing Profile
+            // Step 3: Preparing Profile & Validating Configuration (Before closing Discord)
             _stateMachine.TransitionTo(ConnectionState.Preparing, "Preparing secure server profile...");
             var profile = await _profileCoordinator.GetOrRefreshProfileAsync(SelectedServer.Id);
             
@@ -422,6 +422,32 @@ public class MainViewModel : INotifyPropertyChanged
                 ActivationError = "This installation needs to be activated again.";
                 ErrorMessage = "This installation needs to be activated again.";
                 _stateMachine.TransitionTo(ConnectionState.Error, "Activation required");
+                return;
+            }
+
+            var tunnelConfig = new TunnelConfiguration
+            {
+                ServerId = profile.ServerId,
+                ServerName = SelectedServer.Name,
+                Endpoint = profile.Wireguard.Endpoint,
+                Port = profile.Wireguard.Port,
+                Address = profile.Wireguard.Address,
+                Dns = profile.Wireguard.Dns,
+                PrivateKey = profile.Wireguard.PrivateKey,
+                PeerPublicKey = profile.Wireguard.PeerPublicKey,
+                AllowedIps = profile.Wireguard.AllowedIps,
+                Mtu = profile.Wireguard.Mtu,
+                DiscordExecutablePath = _detectedDiscord.ExecutablePath
+            };
+
+            // Pre-validate engine configuration via NetworkService before any destructive action
+            _stateMachine.TransitionTo(ConnectionState.Preparing, "Validating routing engine configuration...");
+            var valResult = await _networkClient.ValidateConfigAsync(tunnelConfig);
+            if (!valResult.Success)
+            {
+                _logger.Error($"Routing configuration pre-validation failed: {valResult.Message}");
+                ErrorMessage = $"Routing configuration error: {valResult.Message}";
+                _stateMachine.TransitionTo(ConnectionState.Error, "Invalid configuration");
                 return;
             }
 
@@ -439,21 +465,6 @@ public class MainViewModel : INotifyPropertyChanged
 
             // Step 5: Starting Tunnel via NetworkService IPC
             _stateMachine.TransitionTo(ConnectionState.StartingTunnel, "Starting network tunnel...");
-            var tunnelConfig = new TunnelConfiguration
-            {
-                ServerId = profile.ServerId,
-                ServerName = SelectedServer.Name,
-                Endpoint = profile.Wireguard.Endpoint,
-                Port = profile.Wireguard.Port,
-                Address = profile.Wireguard.Address,
-                Dns = profile.Wireguard.Dns,
-                PrivateKey = profile.Wireguard.PrivateKey,
-                PeerPublicKey = profile.Wireguard.PeerPublicKey,
-                AllowedIps = profile.Wireguard.AllowedIps,
-                Mtu = profile.Wireguard.Mtu,
-                DiscordExecutablePath = _detectedDiscord.ExecutablePath
-            };
-
             _activeTunnelConfig = tunnelConfig;
 
             var tunnelResult = await _networkClient.StartTunnelAsync(tunnelConfig);

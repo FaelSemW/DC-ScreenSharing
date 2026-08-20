@@ -153,6 +153,106 @@ public class TunnelHealthMonitorTests
     }
 
     [Fact]
+    public void ProcessRoutingEngine_ContainsNoLegacyDnsOutbound()
+    {
+        var logger = new TestLogger();
+        var engine = new ProcessRoutingEngine(logger);
+
+        var config = new TunnelConfiguration
+        {
+            ServerId = "us-east-1",
+            ServerName = "US East",
+            Endpoint = "198.51.100.1",
+            Port = 51820,
+            Address = "10.8.0.2/32",
+            PrivateKey = "aGVsbG93b3JsZHByaXZhdGVrZXkxMjM0NTY3ODkwMTI=",
+            PeerPublicKey = "c2VydmVycHVibGlja2V5MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=",
+            Mtu = 1420
+        };
+
+        var json = engine.GenerateEngineConfig(config);
+        Assert.DoesNotContain("\"type\": \"dns\"", json);
+        Assert.DoesNotContain("\"dns-out\"", json);
+        Assert.DoesNotContain("\"outbound\": \"dns-out\"", json);
+
+        using var doc = JsonDocument.Parse(json);
+        var outbounds = doc.RootElement.GetProperty("outbounds");
+        foreach (var outbound in outbounds.EnumerateArray())
+        {
+            Assert.NotEqual("dns", outbound.GetProperty("type").GetString());
+        }
+    }
+
+    [Fact]
+    public void ProcessRoutingEngine_ValidatesCleanlyAgainstBundledSingBoxBinary()
+    {
+        var logger = new TestLogger();
+        var tempDir = Path.Combine(Path.GetTempPath(), "DCSS_Test_Val_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var engine = new ProcessRoutingEngine(logger, tempDir);
+
+            var config = new TunnelConfiguration
+            {
+                ServerId = "us-east-1",
+                ServerName = "US East",
+                Endpoint = "198.51.100.1",
+                Port = 51820,
+                Address = "10.8.0.2/32",
+                PrivateKey = "aGVsbG93b3JsZHByaXZhdGVrZXkxMjM0NTY3ODkwMTI=",
+                PeerPublicKey = "c2VydmVycHVibGlja2V5MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=",
+                Mtu = 1420,
+                DiscordExecutablePath = @"C:\Users\TestUser\AppData\Local\Discord\app-1.0.9254\Discord.exe"
+            };
+
+            var (isValid, error) = engine.ValidateRuntimeConfiguration(config);
+            Assert.True(isValid, $"Engine config check failed: {error}");
+            Assert.Null(error);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void ProcessRoutingEngine_AtomicConfigWrite_CleansUpTempFiles()
+    {
+        var logger = new TestLogger();
+        var tempDir = Path.Combine(Path.GetTempPath(), "DCSS_Test_Atomic_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var engine = new ProcessRoutingEngine(logger, tempDir);
+            var config = new TunnelConfiguration
+            {
+                ServerId = "us-east-1",
+                ServerName = "US East",
+                Endpoint = "198.51.100.1",
+                Port = 51820,
+                Address = "10.8.0.2/32",
+                PrivateKey = "aGVsbG93b3JsZHByaXZhdGVrZXkxMjM0NTY3ODkwMTI=",
+                PeerPublicKey = "c2VydmVycHVibGlja2V5MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=",
+                Mtu = 1420
+            };
+
+            var (isValid, _) = engine.ValidateRuntimeConfiguration(config);
+            Assert.True(isValid);
+
+            // Verify no leftover .tmp files
+            var tmpFiles = Directory.GetFiles(tempDir, "*.tmp");
+            Assert.Empty(tmpFiles);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task TunnelHealthMonitor_BoundsRecoveryAttempts_PreventsInfiniteLoop()
     {
         var logger = new TestLogger();

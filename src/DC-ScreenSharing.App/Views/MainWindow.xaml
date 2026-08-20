@@ -238,7 +238,7 @@
 
         <!-- Footer -->
         <Grid Grid.Row="3" Margin="0,12,0,0">
-            <TextBlock Text="v1.0.3 (x64)" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" />
+            <TextBlock Text="v1.0.4 (x64)" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" />
         </Grid>
     </Grid>
 </Window>

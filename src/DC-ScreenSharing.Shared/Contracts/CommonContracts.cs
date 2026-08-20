@@ -9,7 +9,8 @@ public enum IpcCommand
     StartTunnel = 2,
     StopTunnel = 3,
     GetDiagnostics = 4,
-    CleanupOrphaned = 5
+    CleanupOrphaned = 5,
+    ValidateConfig = 6
 }
 
 public class IpcMessage

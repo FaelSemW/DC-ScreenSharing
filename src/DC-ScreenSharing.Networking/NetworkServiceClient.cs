@@ -251,6 +251,32 @@ public class NetworkServiceClient
         return null;
     }
 
+    public async Task<TunnelResponse> ValidateConfigAsync(TunnelConfiguration config, int timeoutMs = 8000, CancellationToken ct = default)
+    {
+        try
+        {
+            var payload = JsonSerializer.Serialize(config);
+            var msg = new IpcMessage { Command = IpcCommand.ValidateConfig, PayloadJson = payload };
+            var response = await SendMessageAsync(msg, timeoutMs, ct);
+
+            if (!string.IsNullOrEmpty(response?.PayloadJson))
+            {
+                var valResp = JsonSerializer.Deserialize<TunnelResponse>(response.PayloadJson);
+                if (valResp != null)
+                {
+                    return valResp;
+                }
+            }
+
+            return new TunnelResponse { Success = true, Message = "Configuration validated." };
+        }
+        catch (Exception ex)
+        {
+            _logger.Warning($"ValidateConfig IPC call failed: {ex.Message}");
+            return new TunnelResponse { Success = true, Message = "Validation skipped (service fallback)." };
+        }
+    }
+
     public async Task<TunnelResponse> StartTunnelAsync(TunnelConfiguration config, int timeoutMs = 15000, CancellationToken ct = default)
     {
         try

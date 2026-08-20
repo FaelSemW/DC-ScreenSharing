@@ -1,6 +1,6 @@
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "1.0.3",
+    [string]$Version = "1.0.4",
     [int]$StageTimeoutSeconds = 300
 )
 
@@ -123,7 +123,7 @@ Run-StepWithTimeout -StageName "[2/7] Build Solution" `
 # [3/7] Run Automated Tests
 Run-StepWithTimeout -StageName "[3/7] Run Automated Tests" `
     -FilePath $dotnet `
-    -ArgumentList @("test", "`"$repoRoot\tests\DC-ScreenSharing.IntegrationTests\DC-ScreenSharing.IntegrationTests.csproj`"", "-c", $Configuration) `
+    -ArgumentList @("test", "`"$repoRoot\tests\DC-ScreenSharing.IntegrationTests\DC-ScreenSharing.IntegrationTests.csproj`"", "-c", $Configuration, "--no-build") `
     -TimeoutSec 120
 
 # [4/7] Publish Applications (App, NetworkService, Updater)

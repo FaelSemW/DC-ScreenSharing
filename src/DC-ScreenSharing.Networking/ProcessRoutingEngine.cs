@@ -61,20 +61,35 @@ public class ProcessRoutingEngine
                 var wintunDll = EnsureWintunDll(Path.GetDirectoryName(engineExe)!);
                 _logger.Info($"[Stage: WintunResolution] Resolved Wintun driver path: {wintunDll ?? "NotFound"}");
 
-                // 3. Stage: runtime config generated
+                // 3. Stage: runtime config generated & written atomically
                 var configJson = GenerateEngineConfig(config);
                 var configPath = Path.Combine(_workingDirectory, "engine_config.json");
-                File.WriteAllText(configPath, configJson);
-                _logger.Info($"[Stage: ConfigGenerated] Generated engine configuration at: {configPath}");
+                var tempConfigPath = Path.Combine(_workingDirectory, "engine_config.json.tmp");
 
-                // 4. Stage: validate config with engine check
-                var validationResult = ValidateConfig(engineExe, configPath);
+                if (File.Exists(tempConfigPath))
+                {
+                    try { File.Delete(tempConfigPath); } catch { }
+                }
+
+                File.WriteAllText(tempConfigPath, configJson);
+
+                // 4. Stage: validate config with engine check on temp config
+                var validationResult = ValidateConfig(engineExe, tempConfigPath);
                 if (!validationResult.IsValid)
                 {
                     _logger.Error($"[Stage: ConfigValidation] Configuration validation failed: {validationResult.Error}");
+                    try { File.Delete(tempConfigPath); } catch { }
                     return (false, "InvalidRuntimeConfig", $"Routing engine rejected configuration: {validationResult.Error}");
                 }
                 _logger.Info("[Stage: ConfigValidation] Configuration passed sing-box validation.");
+
+                // Atomically move/replace to final engine_config.json
+                if (File.Exists(configPath))
+                {
+                    try { File.Delete(configPath); } catch { }
+                }
+                File.Move(tempConfigPath, configPath);
+                _logger.Info($"[Stage: ConfigGenerated] Generated engine configuration at: {configPath}");
 
                 // 5. Stage: engine process starting
                 _logger.Info($"[Stage: ProcessStart] Launching dcss-engine for server '{config.ServerId}' (Endpoint: {config.Endpoint}:{config.Port})...");
@@ -172,6 +187,35 @@ public class ProcessRoutingEngine
         }
     }
 
+    public (bool IsValid, string? Error) ValidateRuntimeConfiguration(TunnelConfiguration config)
+    {
+        try
+        {
+            var engineExe = FindEngineExecutable();
+            if (string.IsNullOrEmpty(engineExe) || !File.Exists(engineExe))
+            {
+                return (true, null);
+            }
+
+            var configJson = GenerateEngineConfig(config);
+            var tempConfigPath = Path.Combine(_workingDirectory, $"validate_{Guid.NewGuid():N}.json");
+            File.WriteAllText(tempConfigPath, configJson);
+
+            try
+            {
+                return ValidateConfig(engineExe, tempConfigPath);
+            }
+            finally
+            {
+                try { File.Delete(tempConfigPath); } catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     private (bool IsValid, string? Error) ValidateConfig(string engineExe, string configPath)
     {
         try
@@ -191,6 +235,7 @@ public class ProcessRoutingEngine
             if (proc == null) return (true, null);
 
             var err = proc.StandardError.ReadToEnd();
+            var stdout = proc.StandardOutput.ReadToEnd();
             proc.WaitForExit(3000);
 
             if (proc.ExitCode == 0)
@@ -198,7 +243,8 @@ public class ProcessRoutingEngine
                 return (true, null);
             }
 
-            return (false, Sanitizer.Sanitize(err.Trim()));
+            var combinedErr = string.IsNullOrWhiteSpace(err) ? stdout : err;
+            return (false, Sanitizer.Sanitize(combinedErr.Trim()));
         }
         catch
         {
@@ -347,11 +393,6 @@ public class ProcessRoutingEngine
                 {
                     type = "direct",
                     tag = "direct"
-                },
-                new
-                {
-                    type = "dns",
-                    tag = "dns-out"
                 }
             },
             route = new
@@ -363,7 +404,7 @@ public class ProcessRoutingEngine
                     new
                     {
                         protocol = "dns",
-                        outbound = "dns-out"
+                        action = "hijack-dns"
                     },
                     new
                     {

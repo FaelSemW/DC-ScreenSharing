@@ -222,12 +222,46 @@ public class IpcServer
                 response.PayloadJson = "\"cleaned\"";
                 break;
 
+            case IpcCommand.ValidateConfig:
+                var valResp = HandleValidateConfig(request.PayloadJson);
+                response.PayloadJson = JsonSerializer.Serialize(valResp);
+                break;
+
             default:
                 response.PayloadJson = "\"unknown_command\"";
                 break;
         }
 
         return response;
+    }
+
+    private TunnelResponse HandleValidateConfig(string payloadJson)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(payloadJson))
+            {
+                return new TunnelResponse { Success = false, ErrorCode = "MissingPayload", Message = "Missing configuration payload." };
+            }
+
+            var config = JsonSerializer.Deserialize<TunnelConfiguration>(payloadJson);
+            if (config == null)
+            {
+                return new TunnelResponse { Success = false, ErrorCode = "InvalidConfig", Message = "Invalid configuration format." };
+            }
+
+            var (isValid, error) = _engine.ValidateRuntimeConfiguration(config);
+            return new TunnelResponse
+            {
+                Success = isValid,
+                ErrorCode = isValid ? null : "ConfigValidationFailed",
+                Message = isValid ? "Configuration is valid." : $"Routing engine rejected configuration: {error}"
+            };
+        }
+        catch (Exception ex)
+        {
+            return new TunnelResponse { Success = false, ErrorCode = "ValidationError", Message = ex.Message };
+        }
     }
 
     private TunnelResponse HandleStartTunnel(string payloadJson)
