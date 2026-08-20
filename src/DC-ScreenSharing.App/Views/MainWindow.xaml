@@ -19,12 +19,13 @@
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" /> <!-- Header -->
+            <RowDefinition Height="Auto" /> <!-- Update Banner -->
             <RowDefinition Height="*" />    <!-- Content (Activation or Main) -->
             <RowDefinition Height="Auto" /> <!-- Footer -->
         </Grid.RowDefinitions>
 
         <!-- Header -->
-        <Grid Grid.Row="0" Margin="0,0,0,20">
+        <Grid Grid.Row="0" Margin="0,0,0,16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -36,8 +37,48 @@
             <Button Grid.Column="1" Content="Settings" Style="{StaticResource SecondaryButtonStyle}" Click="OnOpenSettingsClick" VerticalAlignment="Center" />
         </Grid>
 
+        <!-- Update Available Banner -->
+        <Border Grid.Row="1" Margin="0,0,0,16" Background="#1E293B" BorderBrush="#3B82F6" BorderThickness="1" CornerRadius="8" Padding="12">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsUpdateAvailable}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding UpdateTitle}" FontSize="12" FontWeight="SemiBold" Foreground="#FFFFFF" />
+                    <TextBlock Text="{Binding UpdateStatusText}" FontSize="11" Foreground="#94A3B8" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+                    <ProgressBar Value="{Binding UpdateProgress}" Maximum="100" Height="4" Margin="0,6,0,0" Foreground="#38BDF8">
+                        <ProgressBar.Style>
+                            <Style TargetType="ProgressBar">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsUpdating}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ProgressBar.Style>
+                    </ProgressBar>
+                </StackPanel>
+                <Button Grid.Column="1" Content="Update Now" Style="{StaticResource ModernButtonStyle}"
+                        Command="{Binding ApplyUpdateCommand}"
+                        IsEnabled="{Binding IsUpdating, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
+                        Padding="10,4" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0" />
+            </Grid>
+        </Border>
+
         <!-- View 1: Activation Required Screen (When NOT Activated) -->
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="2">
             <Grid.Style>
                 <Style TargetType="Grid">
                     <Setter Property="Visibility" Value="Collapsed" />
@@ -76,7 +117,7 @@
         </Grid>
 
         <!-- View 2: Main Connected / Server Selection View (When Activated) -->
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="2">
             <Grid.Style>
                 <Style TargetType="Grid">
                     <Setter Property="Visibility" Value="Collapsed" />
@@ -196,7 +237,7 @@
         </Grid>
 
         <!-- Footer -->
-        <Grid Grid.Row="2" Margin="0,12,0,0">
+        <Grid Grid.Row="3" Margin="0,12,0,0">
             <TextBlock Text="v1.0.2 (x64)" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" />
         </Grid>
     </Grid>

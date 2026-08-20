@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.IO;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -43,8 +45,8 @@ public class GitHubReleaseResponse
 public class UpdateCheckResult
 {
     public bool UpdateAvailable { get; set; }
-    public Version CurrentVersion { get; set; } = new(1, 0, 1);
-    public Version LatestVersion { get; set; } = new(1, 0, 1);
+    public Version CurrentVersion { get; set; } = new(1, 0, 2);
+    public Version LatestVersion { get; set; } = new(1, 0, 2);
     public string ReleaseNotes { get; set; } = string.Empty;
     public string? DownloadUrl { get; set; }
     public string? ChecksumUrl { get; set; }
@@ -56,7 +58,7 @@ public class ApplicationUpdateService
     private readonly HttpClient _httpClient;
     private readonly IAppLogger _logger;
     private readonly string _releasesApiUrl;
-    private readonly string _stagingDirectory;
+    private readonly string _updatesDirectory;
 
     public ApplicationUpdateService(
         IAppLogger logger,
@@ -65,17 +67,19 @@ public class ApplicationUpdateService
     {
         _logger = logger;
         _releasesApiUrl = releasesApiUrl ?? Constants.GitHubReleasesApiUrl;
-        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("DC-ScreenSharing-Updater/1.0");
 
-        _stagingDirectory = Path.Combine(Path.GetTempPath(), "DC-ScreenSharing", "Updates");
+        _updatesDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DC-ScreenSharing", "Updates");
         try
         {
-            Directory.CreateDirectory(_stagingDirectory);
+            Directory.CreateDirectory(_updatesDirectory);
         }
         catch
         {
-            // Ignore staging dir creation errors
+            // Fallback to temp if local app data fails
+            _updatesDirectory = Path.Combine(Path.GetTempPath(), "DC-ScreenSharing", "Updates");
+            try { Directory.CreateDirectory(_updatesDirectory); } catch { }
         }
     }
 
@@ -89,10 +93,13 @@ public class ApplicationUpdateService
             var json = await _httpClient.GetStringAsync(_releasesApiUrl, ct);
             var release = JsonSerializer.Deserialize<GitHubReleaseResponse>(json);
 
-            if (release == null || release.Draft)
+            if (release == null || release.Draft || release.Prerelease)
+            {
+                _logger.Info("No applicable release found (draft/prerelease or empty response).");
                 return result;
+            }
 
-            var tagClean = release.TagName.TrimStart('v', 'V');
+            var tagClean = release.TagName.TrimStart('v', 'V').Trim();
             if (Version.TryParse(tagClean, out var remoteVersion))
             {
                 result.LatestVersion = remoteVersion;
@@ -103,22 +110,39 @@ public class ApplicationUpdateService
                     _logger.Info($"New application version detected: v{remoteVersion} (current: v{currentVersion})");
                     result.UpdateAvailable = true;
 
-                    var exeAsset = release.Assets.FirstOrDefault(a => a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
+                    // Select the main installer .exe asset (e.g. DC-ScreenSharing-Setup-1.0.2.exe)
+                    var exeAsset = release.Assets.FirstOrDefault(a => 
+                        a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && 
+                        !a.Name.Contains("Maintainer", StringComparison.OrdinalIgnoreCase) &&
+                        !a.Name.Contains("Collector", StringComparison.OrdinalIgnoreCase));
+
                     if (exeAsset != null)
                     {
                         result.DownloadUrl = exeAsset.BrowserDownloadUrl;
                         result.FileName = exeAsset.Name;
+                        _logger.Info($"Selected update installer asset: {exeAsset.Name} ({exeAsset.Size} bytes)");
+                    }
+                    else
+                    {
+                        _logger.Warning("Release has newer version tag, but no matching installer executable asset found.");
+                        result.UpdateAvailable = false;
+                        return result;
                     }
 
-                    var shaAsset = release.Assets.FirstOrDefault(a => a.Name.Contains("SHA256", StringComparison.OrdinalIgnoreCase));
+                    // Select checksum asset if available
+                    var shaAsset = release.Assets.FirstOrDefault(a => 
+                        a.Name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase) || 
+                        a.Name.Equals("SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase));
+
                     if (shaAsset != null)
                     {
                         result.ChecksumUrl = shaAsset.BrowserDownloadUrl;
+                        _logger.Info($"Selected checksum asset: {shaAsset.Name}");
                     }
                 }
                 else
                 {
-                    _logger.Info($"Application is up to date (v{currentVersion}).");
+                    _logger.Info($"Application is up to date (current: v{currentVersion}, latest: v{remoteVersion}).");
                 }
             }
         }
@@ -138,58 +162,74 @@ public class ApplicationUpdateService
         if (string.IsNullOrEmpty(updateInfo.DownloadUrl) || string.IsNullOrEmpty(updateInfo.FileName))
             return null;
 
-        var destinationPath = Path.Combine(_stagingDirectory, updateInfo.FileName);
+        var destinationPath = Path.Combine(_updatesDirectory, updateInfo.FileName);
+        var partPath = destinationPath + ".part";
 
         try
         {
-            _logger.Info($"Downloading update {updateInfo.FileName} to {destinationPath}...");
+            if (File.Exists(partPath))
+            {
+                try { File.Delete(partPath); } catch { }
+            }
+
+            _logger.Info($"Downloading update {updateInfo.FileName} to {partPath}...");
             using var response = await _httpClient.GetAsync(updateInfo.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
             response.EnsureSuccessStatusCode();
 
             var totalBytes = response.Content.Headers.ContentLength ?? -1L;
             await using var contentStream = await response.Content.ReadAsStreamAsync(ct);
-            await using var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true);
-
-            var buffer = new byte[8192];
-            long totalRead = 0;
-            int bytesRead;
-
-            while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, ct)) > 0)
+            await using (var fileStream = new FileStream(partPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
             {
-                await fileStream.WriteAsync(buffer, 0, bytesRead, ct);
-                totalRead += bytesRead;
+                var buffer = new byte[16384];
+                long totalRead = 0;
+                int bytesRead;
 
-                if (totalBytes > 0 && progress != null)
+                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, ct)) > 0)
                 {
-                    var percentage = (int)((totalRead * 100) / totalBytes);
-                    progress.Report(percentage);
+                    await fileStream.WriteAsync(buffer, 0, bytesRead, ct);
+                    totalRead += bytesRead;
+
+                    if (totalBytes > 0 && progress != null)
+                    {
+                        var percentage = (int)((totalRead * 100) / totalBytes);
+                        progress.Report(percentage);
+                    }
                 }
+
+                await fileStream.FlushAsync(ct);
             }
 
-            fileStream.Close();
-            _logger.Info("Update download complete. Verifying file integrity...");
+            _logger.Info("Update download completed. Verifying SHA-256 integrity...");
 
-            // If checksum URL is available, verify SHA256
+            // If checksum URL is available, verify SHA256 against candidate
             if (!string.IsNullOrEmpty(updateInfo.ChecksumUrl))
             {
-                var shaVerified = await VerifySha256Async(destinationPath, updateInfo.ChecksumUrl, updateInfo.FileName, ct);
+                var shaVerified = await VerifySha256Async(partPath, updateInfo.ChecksumUrl, updateInfo.FileName, ct);
                 if (!shaVerified)
                 {
                     _logger.Error("Update verification failed! Checksum mismatch. Aborting update.");
-                    if (File.Exists(destinationPath)) File.Delete(destinationPath);
+                    if (File.Exists(partPath)) File.Delete(partPath);
                     return null;
                 }
+                _logger.Info("SHA-256 checksum verification PASS.");
             }
 
-            _logger.Info("Update verification successful.");
+            // Atomic rename from .part to final .exe
+            if (File.Exists(destinationPath))
+            {
+                File.Delete(destinationPath);
+            }
+            File.Move(partPath, destinationPath);
+
+            _logger.Info($"Update installer verified and ready at: {destinationPath}");
             return destinationPath;
         }
         catch (Exception ex)
         {
             _logger.Error("Failed to download/verify update", ex);
-            if (File.Exists(destinationPath))
+            if (File.Exists(partPath))
             {
-                try { File.Delete(destinationPath); } catch { }
+                try { File.Delete(partPath); } catch { }
             }
             return null;
         }
@@ -202,12 +242,17 @@ public class ApplicationUpdateService
             var checksumContent = await _httpClient.GetStringAsync(checksumUrl, ct);
             var computedHash = ComputeSha256(filePath);
 
-            foreach (var line in checksumContent.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            foreach (var rawLine in checksumContent.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
             {
+                var line = rawLine.Trim();
                 if (line.Contains(fileName, StringComparison.OrdinalIgnoreCase))
                 {
                     var expectedHash = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
                     return string.Equals(computedHash, expectedHash, StringComparison.OrdinalIgnoreCase);
+                }
+                else if (line.Length == 64 && !line.Contains(" ")) // Single hash file format
+                {
+                    return string.Equals(computedHash, line, StringComparison.OrdinalIgnoreCase);
                 }
             }
 
@@ -217,6 +262,62 @@ public class ApplicationUpdateService
         {
             _logger.Warning($"Could not verify SHA-256 against checksum file: {ex.Message}");
             return true; // Allow proceeding if checksum file unreachable but binary downloaded intact
+        }
+    }
+
+    public bool LaunchUpdater(string installerPath, string? mainExecutablePath = null)
+    {
+        try
+        {
+            if (!File.Exists(installerPath))
+            {
+                _logger.Error($"Cannot launch updater: Installer not found at '{installerPath}'");
+                return false;
+            }
+
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            var updaterCandidates = new[]
+            {
+                Path.Combine(baseDir, "DC-ScreenSharing.Updater.exe"),
+                Path.Combine(Directory.GetCurrentDirectory(), "DC-ScreenSharing.Updater.exe"),
+                @"C:\Program Files\DC-ScreenSharing\DC-ScreenSharing.Updater.exe"
+            };
+
+            var updaterExe = updaterCandidates.FirstOrDefault(File.Exists);
+            if (string.IsNullOrEmpty(updaterExe))
+            {
+                _logger.Warning("DC-ScreenSharing.Updater.exe not found beside app. Attempting direct installer launch.");
+                var directPsi = new ProcessStartInfo
+                {
+                    FileName = installerPath,
+                    Arguments = "/SILENT /CLOSEAPPLICATIONS",
+                    UseShellExecute = true
+                };
+                Process.Start(directPsi);
+                return true;
+            }
+
+            var currentPid = Process.GetCurrentProcess().Id;
+            var relaunchExe = mainExecutablePath ?? Environment.ProcessPath ?? Path.Combine(baseDir, "DC-ScreenSharing.exe");
+
+            var arguments = $"--staged \"{installerPath}\" --target-pid {currentPid} --relaunch \"{relaunchExe}\"";
+            _logger.Info($"Launching updater: {updaterExe} {arguments}");
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = updaterExe,
+                Arguments = arguments,
+                WorkingDirectory = Path.GetDirectoryName(updaterExe),
+                UseShellExecute = true
+            };
+
+            var proc = Process.Start(psi);
+            return proc != null;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Failed to launch updater coordinator", ex);
+            return false;
         }
     }
 

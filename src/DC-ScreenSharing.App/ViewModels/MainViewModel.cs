@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
@@ -69,6 +70,14 @@ public class MainViewModel : INotifyPropertyChanged
     private string? _activationError;
     private bool _isActivating;
 
+    // Update State
+    private bool _isUpdateAvailable;
+    private string _updateTitle = string.Empty;
+    private string _updateStatusText = string.Empty;
+    private bool _isUpdating;
+    private int _updateProgress;
+    private UpdateCheckResult? _pendingUpdateInfo;
+
     public ObservableCollection<ServerEntry> Servers { get; } = new();
 
     public bool IsActivated
@@ -93,6 +102,36 @@ public class MainViewModel : INotifyPropertyChanged
     {
         get => _isActivating;
         set => SetProperty(ref _isActivating, value);
+    }
+
+    public bool IsUpdateAvailable
+    {
+        get => _isUpdateAvailable;
+        set => SetProperty(ref _isUpdateAvailable, value);
+    }
+
+    public string UpdateTitle
+    {
+        get => _updateTitle;
+        set => SetProperty(ref _updateTitle, value);
+    }
+
+    public string UpdateStatusText
+    {
+        get => _updateStatusText;
+        set => SetProperty(ref _updateStatusText, value);
+    }
+
+    public bool IsUpdating
+    {
+        get => _isUpdating;
+        set => SetProperty(ref _isUpdating, value);
+    }
+
+    public int UpdateProgress
+    {
+        get => _updateProgress;
+        set => SetProperty(ref _updateProgress, value);
     }
 
     public ServerEntry? SelectedServer
@@ -163,6 +202,7 @@ public class MainViewModel : INotifyPropertyChanged
     public ICommand RefreshDiscordCommand { get; }
     public ICommand RefreshCatalogCommand { get; }
     public ICommand ActivateCommand { get; }
+    public ICommand ApplyUpdateCommand { get; }
 
     public MainViewModel(
         IAppLogger logger,
@@ -198,6 +238,7 @@ public class MainViewModel : INotifyPropertyChanged
         RefreshDiscordCommand = new RelayCommand(_ => RefreshDiscord());
         RefreshCatalogCommand = new RelayCommand(async _ => await LoadServerCatalogAsync());
         ActivateCommand = new RelayCommand(async _ => await ActivateAsync(), _ => !IsActivating && !string.IsNullOrWhiteSpace(ActivationCode));
+        ApplyUpdateCommand = new RelayCommand(async _ => await ApplyUpdateAsync(), _ => !IsUpdating && IsUpdateAvailable);
 
         _stateMachine.StateChanged += OnStateChanged;
 
@@ -592,9 +633,88 @@ public class MainViewModel : INotifyPropertyChanged
             if (result.UpdateAvailable)
             {
                 _logger.Info($"Application update available: v{result.LatestVersion}");
+                _pendingUpdateInfo = result;
+
+                Application.Current?.Dispatcher.Invoke(() =>
+                {
+                    IsUpdateAvailable = true;
+                    UpdateTitle = $"Update available: DC-ScreenSharing v{result.LatestVersion}";
+                    UpdateStatusText = "A new update is ready to install.";
+                });
+            }
+            else
+            {
+                Application.Current?.Dispatcher.Invoke(() =>
+                {
+                    IsUpdateAvailable = false;
+                });
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _logger.Warning($"Background update check error: {ex.Message}");
+        }
+    }
+
+    public async Task ApplyUpdateAsync()
+    {
+        if (_pendingUpdateInfo == null || !_pendingUpdateInfo.UpdateAvailable)
+            return;
+
+        IsUpdating = true;
+        UpdateStatusText = "Downloading update (0%)...";
+        UpdateProgress = 0;
+
+        try
+        {
+            var progress = new Progress<int>(pct =>
+            {
+                Application.Current?.Dispatcher.Invoke(() =>
+                {
+                    UpdateProgress = pct;
+                    UpdateStatusText = $"Downloading update ({pct}%)...";
+                });
+            });
+
+            var installerPath = await _updateService.DownloadAndVerifyUpdateAsync(_pendingUpdateInfo, progress);
+            if (string.IsNullOrEmpty(installerPath) || !File.Exists(installerPath))
+            {
+                ErrorMessage = "Failed to download update package. Please try again.";
+                UpdateStatusText = "Update download failed.";
+                IsUpdating = false;
+                return;
+            }
+
+            UpdateStatusText = "Preparing update installation...";
+
+            // If tunnel is active, disconnect cleanly before applying update
+            if (_isConnected)
+            {
+                _logger.Info("Disconnecting active tunnel before applying update...");
+                await DisconnectAsync();
+            }
+
+            _logger.Info($"Launching updater coordinator with package: {installerPath}");
+            var launched = _updateService.LaunchUpdater(installerPath);
+            if (launched)
+            {
+                _logger.Info("Updater process started. Shutting down main application for update.");
+                Application.Current?.Dispatcher.Invoke(() => Application.Current.Shutdown());
+            }
+            else
+            {
+                ErrorMessage = "Could not start update coordinator.";
+                UpdateStatusText = "Failed to launch updater.";
+                IsUpdating = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Exception while applying update", ex);
+            ErrorMessage = $"Update error: {ex.Message}";
+            UpdateStatusText = "Update failed.";
+            IsUpdating = false;
+        }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
