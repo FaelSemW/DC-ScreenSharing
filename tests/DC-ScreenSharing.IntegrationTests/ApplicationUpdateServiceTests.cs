@@ -105,17 +105,57 @@ public class ApplicationUpdateServiceTests
         Assert.Equal("DC-ScreenSharing-Setup-1.0.2.exe.sha256", checksumAsset.Name);
     }
 
+    private class MockHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly string _responseJson;
+
+        public MockHttpMessageHandler(string responseJson)
+        {
+            _responseJson = responseJson;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(_responseJson, System.Text.Encoding.UTF8, "application/json")
+            };
+            return Task.FromResult(response);
+        }
+    }
+
     [Fact]
     public async Task CheckForUpdatesAsync_FromOlderVersion_DetectsLatestRelease()
     {
-        var updateService = new ApplicationUpdateService(new TestLogger());
+        var mockReleaseJson = @"{
+            ""tag_name"": ""v1.0.10"",
+            ""name"": ""DC-ScreenSharing v1.0.10"",
+            ""draft"": false,
+            ""prerelease"": false,
+            ""body"": ""Release notes for v1.0.10"",
+            ""assets"": [
+                {
+                    ""name"": ""DC-ScreenSharing-Setup-1.0.10.exe"",
+                    ""browser_download_url"": ""https://github.com/FaelSemW/DC-ScreenSharing/releases/download/v1.0.10/DC-ScreenSharing-Setup-1.0.10.exe"",
+                    ""size"": 63995647
+                },
+                {
+                    ""name"": ""DC-ScreenSharing-Setup-1.0.10.exe.sha256"",
+                    ""browser_download_url"": ""https://github.com/FaelSemW/DC-ScreenSharing/releases/download/v1.0.10/DC-ScreenSharing-Setup-1.0.10.exe.sha256"",
+                    ""size"": 64
+                }
+            ]
+        }";
+
+        var mockClient = new HttpClient(new MockHttpMessageHandler(mockReleaseJson));
+        var updateService = new ApplicationUpdateService(new TestLogger(), httpClient: mockClient);
 
         var result = await updateService.CheckForUpdatesAsync(new Version(1, 0, 8));
 
         Assert.True(result.UpdateAvailable);
-        Assert.True(result.LatestVersion >= new Version(1, 0, 9));
+        Assert.Equal(new Version(1, 0, 10), result.LatestVersion);
         Assert.NotNull(result.DownloadUrl);
-        Assert.Contains("DC-ScreenSharing-Setup-", result.DownloadUrl);
+        Assert.Contains("DC-ScreenSharing-Setup-1.0.10.exe", result.DownloadUrl);
 
         // When running a future or matching latest version, no update should be available
         var currentResult = await updateService.CheckForUpdatesAsync(new Version(2, 0, 0));
