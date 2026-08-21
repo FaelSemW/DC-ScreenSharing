@@ -10,6 +10,7 @@ using Xunit;
 
 namespace DC_ScreenSharing.IntegrationTests;
 
+[Collection("Sequential")]
 public class AdminWebsiteTests : IClassFixture<WebApplicationFactory<global::Program>>, IDisposable
 {
     private readonly WebApplicationFactory<global::Program> _factory;
