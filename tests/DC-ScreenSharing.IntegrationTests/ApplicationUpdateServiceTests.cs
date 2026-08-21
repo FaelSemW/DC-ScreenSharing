@@ -106,15 +106,19 @@ public class ApplicationUpdateServiceTests
     }
 
     [Fact]
-    public async Task CheckForUpdatesAsync_FromV107_DetectsV108Release()
+    public async Task CheckForUpdatesAsync_FromV108_DetectsV109Release()
     {
         var updateService = new ApplicationUpdateService(new TestLogger());
 
-        var result = await updateService.CheckForUpdatesAsync(new Version(1, 0, 7));
+        var result = await updateService.CheckForUpdatesAsync(new Version(1, 0, 8));
 
         Assert.True(result.UpdateAvailable);
-        Assert.Equal(new Version(1, 0, 8), result.LatestVersion);
+        Assert.Equal(new Version(1, 0, 9), result.LatestVersion);
         Assert.NotNull(result.DownloadUrl);
-        Assert.Contains("DC-ScreenSharing-Setup-1.0.8.exe", result.DownloadUrl);
+        Assert.Contains("DC-ScreenSharing-Setup-1.0.9.exe", result.DownloadUrl);
+
+        // When already running v1.0.9, no update should be available
+        var currentResult = await updateService.CheckForUpdatesAsync(new Version(1, 0, 9));
+        Assert.False(currentResult.UpdateAvailable);
     }
 }
