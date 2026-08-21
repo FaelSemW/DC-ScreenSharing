@@ -384,4 +384,121 @@ PersistentKeepalive = 25";
         Assert.True(dash.TryGetProperty("activeKeysCount", out _));
         Assert.True(dash.TryGetProperty("availableServersCount", out _));
     }
+
+    [Fact]
+    public async Task Servers_SaveAndPublish_WireGuardServer_AtomicallyPublishesNextGeneration()
+    {
+        await AuthenticateAdminAsync();
+
+        var healthBefore = await _client.GetFromJsonAsync<JsonElement>("/api/v1/health");
+        var prevGen = healthBefore.GetProperty("activeGeneration").GetInt32();
+
+        var conf = @"[Interface]
+PrivateKey = aGVsbG93b3JsZHByaXZhdGVrZXkxMjM0NTY3ODkwMTI=
+Address = 10.2.0.2/32
+
+[Peer]
+PublicKey = c2VydmVycHVibGlja2V5MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=
+Endpoint = 198.51.100.99:51820
+AllowedIPs = 0.0.0.0/0";
+
+        var addResp = await _client.PostAsJsonAsync("/api/v1/admin/servers", new AddServerRequest
+        {
+            DisplayName = "US WireGuard East",
+            Country = "United States",
+            CountryCode = "US",
+            Region = "Virginia",
+            Provider = "Custom",
+            ConfContent = conf,
+            PublishImmediately = true
+        });
+
+        Assert.Equal(HttpStatusCode.OK, addResp.StatusCode);
+        var resObj = await addResp.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(resObj.GetProperty("success").GetBoolean());
+        Assert.True(resObj.GetProperty("published").GetBoolean());
+        var newGen = resObj.GetProperty("generation").GetInt32();
+        Assert.True(newGen > prevGen);
+
+        // Verify active generation in manifest
+        var manifestResp = await _client.GetFromJsonAsync<JsonElement>("/api/v1/manifest");
+        Assert.Equal(newGen, manifestResp.GetProperty("generation").GetInt32());
+    }
+
+    [Fact]
+    public async Task Servers_SaveAndPublish_OpenVpnServer_WithLinkedCredentialSet_AtomicallyPublishesNextGeneration()
+    {
+        await AuthenticateAdminAsync();
+
+        // 1. Create Credential Set
+        var credResp = await _client.PostAsJsonAsync("/api/v1/admin/openvpn/credential-sets", new CreateCredentialSetRequest
+        {
+            Name = "VPNBook Account",
+            Provider = "VPNBook",
+            Username = "vpnbook",
+            Password = "password123"
+        });
+        Assert.Equal(HttpStatusCode.OK, credResp.StatusCode);
+        var credObj = await credResp.Content.ReadFromJsonAsync<JsonElement>();
+        var credId = credObj.GetProperty("credentialSet").GetProperty("id").GetString();
+        Assert.NotNull(credId);
+
+        var healthBefore = await _client.GetFromJsonAsync<JsonElement>("/api/v1/health");
+        var prevGen = healthBefore.GetProperty("activeGeneration").GetInt32();
+
+        // 2. Add OpenVPN Server with PublishImmediately = true
+        var ovpn = @"client
+dev tun
+proto tcp
+remote 147.135.15.16 443
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+auth-user-pass
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIB/zCCAaagAwIBAgIU
+-----END CERTIFICATE-----
+</ca>";
+
+        var addResp = await _client.PostAsJsonAsync("/api/v1/admin/servers/openvpn", new AddOpenVpnServerRequest
+        {
+            DisplayName = "US OpenVPN TCP443",
+            Country = "United States",
+            CountryCode = "US",
+            City = "New York",
+            Provider = "VPNBook",
+            CredentialSetId = credId,
+            OvpnContent = ovpn,
+            PublishImmediately = true
+        });
+
+        Assert.Equal(HttpStatusCode.OK, addResp.StatusCode);
+        var resObj = await addResp.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(resObj.GetProperty("success").GetBoolean());
+        Assert.True(resObj.GetProperty("published").GetBoolean());
+        var newGen = resObj.GetProperty("generation").GetInt32();
+        Assert.True(newGen > prevGen);
+
+        // Verify active generation in manifest
+        var manifestResp = await _client.GetFromJsonAsync<JsonElement>("/api/v1/manifest");
+        Assert.Equal(newGen, manifestResp.GetProperty("generation").GetInt32());
+    }
+
+    [Fact]
+    public async Task Servers_PublishAll_PublishesAllPendingChangesAtomically()
+    {
+        await AuthenticateAdminAsync();
+
+        var healthBefore = await _client.GetFromJsonAsync<JsonElement>("/api/v1/health");
+        var prevGen = healthBefore.GetProperty("activeGeneration").GetInt32();
+
+        var pubResp = await _client.PostAsync("/api/v1/admin/servers/publish-all", null);
+        Assert.Equal(HttpStatusCode.OK, pubResp.StatusCode);
+        var pubObj = await pubResp.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(pubObj.GetProperty("success").GetBoolean());
+        var newGen = pubObj.GetProperty("generation").GetInt32();
+        Assert.True(newGen > prevGen);
+    }
 }

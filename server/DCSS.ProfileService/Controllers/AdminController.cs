@@ -96,6 +96,7 @@ public class UpdateOpenVpnServerRequest
     public string Provider { get; set; } = "Custom";
     public string? CredentialSetId { get; set; }
     public bool Enabled { get; set; } = true;
+    public bool PublishImmediately { get; set; } = false;
 }
 
 public class CreateCredentialSetRequest
@@ -753,7 +754,29 @@ public class AdminController : ControllerBase
             ["enabled"] = request.Enabled.ToString()
         });
 
-        return Ok(new { success = true, message = "Server updated." });
+        if (request.PublishImmediately)
+        {
+            var (pubSuccess, pubError, newGen) = _store.CreateAndPublishNewGeneration(publishedBy: "Admin Web Console (Update & Publish)");
+            if (pubSuccess)
+            {
+                return Ok(new
+                {
+                    success = true,
+                    published = true,
+                    generation = newGen,
+                    message = $"Server '{request.DisplayName}' updated and published in Generation #{newGen}."
+                });
+            }
+            return Ok(new
+            {
+                success = true,
+                published = false,
+                publishError = pubError,
+                message = $"Server '{request.DisplayName}' updated in registry, but publish failed: {pubError}"
+            });
+        }
+
+        return Ok(new { success = true, published = false, message = "Server updated in registry." });
     }
 
     [HttpPut("servers/openvpn/{serverId}")]
@@ -779,7 +802,78 @@ public class AdminController : ControllerBase
             ["credentialSetId"] = request.CredentialSetId ?? "none"
         });
 
-        return Ok(new { success = true, message = "OpenVPN server updated." });
+        if (request.PublishImmediately)
+        {
+            var (pubSuccess, pubError, newGen) = _store.CreateAndPublishNewGeneration(publishedBy: "Admin Web Console (Update & Publish)");
+            if (pubSuccess)
+            {
+                return Ok(new
+                {
+                    success = true,
+                    published = true,
+                    generation = newGen,
+                    message = $"OpenVPN server '{request.DisplayName}' updated and published in Generation #{newGen}."
+                });
+            }
+            return Ok(new
+            {
+                success = true,
+                published = false,
+                publishError = pubError,
+                message = $"OpenVPN server '{request.DisplayName}' updated in registry, but publish failed: {pubError}"
+            });
+        }
+
+        return Ok(new { success = true, published = false, message = "OpenVPN server updated in registry." });
+    }
+
+    [HttpPost("servers/publish-all")]
+    public IActionResult PublishAllServers()
+    {
+        var (pubSuccess, pubError, newGen) = _store.CreateAndPublishNewGeneration(publishedBy: "Admin Web Console (Publish All)");
+        if (!pubSuccess)
+        {
+            return BadRequest(new { error = $"Publication failed: {pubError}" });
+        }
+
+        _auditLog.Record("GenerationPublished", "admin", GetClientIp(), targetId: newGen.ToString(), metadata: new()
+        {
+            ["action"] = "PublishAllServers",
+            ["generation"] = newGen.ToString()
+        });
+
+        return Ok(new
+        {
+            success = true,
+            generation = newGen,
+            message = $"All changes published successfully in Generation #{newGen}."
+        });
+    }
+
+    [HttpPost("servers/{serverId}/publish")]
+    public IActionResult PublishSingleServer(string serverId)
+    {
+        var server = _store.GetServerById(serverId);
+        if (server == null) return NotFound(new { error = "Server not found." });
+
+        var (pubSuccess, pubError, newGen) = _store.CreateAndPublishNewGeneration(publishedBy: $"Admin Web Console (Publish Server '{server.Name}')");
+        if (!pubSuccess)
+        {
+            return BadRequest(new { error = $"Publication failed: {pubError}" });
+        }
+
+        _auditLog.Record("ServerPublished", "admin", GetClientIp(), targetId: serverId, metadata: new()
+        {
+            ["name"] = server.Name,
+            ["generation"] = newGen.ToString()
+        });
+
+        return Ok(new
+        {
+            success = true,
+            generation = newGen,
+            message = $"Server '{server.Name}' published in Generation #{newGen}."
+        });
     }
 
     [HttpPost("servers/{serverId}/enable")]

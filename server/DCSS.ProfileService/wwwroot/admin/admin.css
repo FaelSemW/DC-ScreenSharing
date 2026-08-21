@@ -1207,3 +1207,90 @@ a:hover {
     from { opacity: 0; }
     to { opacity: 1; }
 }
+
+/* ==========================================================================
+   Top Bar Chips, Highlighted Actions & Confirmations
+   ========================================================================== */
+
+.server-top-bar {
+    background: linear-gradient(135deg, rgba(24, 34, 50, 0.9), rgba(19, 27, 38, 0.95));
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-full);
+    font-size: 13px;
+}
+
+.chip-label {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.chip-val {
+    color: var(--text-primary);
+    font-weight: 700;
+}
+
+.chip-primary {
+    border-color: rgba(88, 101, 242, 0.4);
+    background: rgba(88, 101, 242, 0.12);
+}
+.chip-primary .chip-val {
+    color: #79a2ff;
+}
+
+.chip-success {
+    border-color: rgba(35, 165, 90, 0.4);
+    background: rgba(35, 165, 90, 0.12);
+}
+.chip-success .chip-val {
+    color: var(--accent-success);
+}
+
+.chip-warning {
+    border-color: rgba(240, 178, 50, 0.4);
+    background: rgba(240, 178, 50, 0.15);
+}
+.chip-warning .chip-val {
+    color: var(--accent-warning);
+}
+
+.btn-publish-highlight {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+    border-color: #047857 !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.5px;
+    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+    transition: all 0.2s ease;
+}
+
+.btn-publish-highlight:hover {
+    background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
+    transform: translateY(-1px);
+}
+
+.success-icon-badge {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(16, 185, 129, 0.15);
+    border: 2px solid #10b981;
+    color: #10b981;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    font-weight: bold;
+    margin: 0 auto;
+}
+

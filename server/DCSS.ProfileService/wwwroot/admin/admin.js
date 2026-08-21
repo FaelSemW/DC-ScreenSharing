@@ -1,9 +1,9 @@
 // ==========================================================================
 // DC-ScreenSharing — Admin Management Frontend Logic
-// Full Dual-Protocol Support: WireGuard + OpenVPN (.ovpn)
+// Unified Dual-Protocol Single-Page Publishing (WireGuard + OpenVPN)
 // ==========================================================================
 
-let currentActiveSection = 'dashboard';
+let currentActiveSection = 'servers';
 let currentKeysList = [];
 let currentClientsList = [];
 let currentServersList = [];
@@ -11,14 +11,15 @@ let currentCredentialSetsList = [];
 let currentProtocolTab = 'WIREGUARD';
 let keyFilterMode = 'all';
 let validationDebounceTimer = null;
+let wgValidationDebounceTimer = null;
 let bulkFilesToImport = [];
 let currentPublicationStatus = null;
 
 const sectionTitles = {
     'dashboard': 'Dashboard',
+    'servers': 'Servers (Dual Protocol)',
     'access-keys': 'Access Keys',
     'clients': 'Enrolled Clients',
-    'servers': 'Servers (Dual Protocol)',
     'generations': 'Catalog Generations',
     'audit': 'Security & Audit Log',
     'system': 'System Information'
@@ -32,15 +33,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 window.addEventListener('hashchange', handleHashNavigation);
 
 function handleHashNavigation() {
-    const hash = window.location.hash.replace('#', '') || 'dashboard';
+    const hash = window.location.hash.replace('#', '') || 'servers';
     navigateTo(hash);
 }
 
 function navigateTo(sectionId, event) {
     if (event) event.preventDefault();
 
-    const validSections = ['dashboard', 'access-keys', 'clients', 'servers', 'generations', 'audit', 'system'];
-    if (!validSections.includes(sectionId)) sectionId = 'dashboard';
+    const validSections = ['servers', 'dashboard', 'access-keys', 'clients', 'generations', 'audit', 'system'];
+    if (!validSections.includes(sectionId)) sectionId = 'servers';
 
     currentActiveSection = sectionId;
     window.location.hash = sectionId;
@@ -48,7 +49,7 @@ function navigateTo(sectionId, event) {
     // Update page title in header
     const titleEl = document.getElementById('page-title');
     if (titleEl) {
-        titleEl.textContent = sectionTitles[sectionId] || 'Dashboard';
+        titleEl.textContent = sectionTitles[sectionId] || 'Servers';
     }
 
     // Toggle section visibility
@@ -66,10 +67,10 @@ function navigateTo(sectionId, event) {
     // Load data for section
     try {
         switch (sectionId) {
+            case 'servers': loadServers(); break;
             case 'dashboard': loadDashboard(); break;
             case 'access-keys': loadAccessKeys(); break;
             case 'clients': loadClients(); break;
-            case 'servers': loadServers(); break;
             case 'generations': loadGenerations(); break;
             case 'audit': loadAuditLog(); break;
             case 'system': loadSystemInfo(); break;
@@ -152,7 +153,8 @@ async function handleLogout() {
 
 function togglePasswordVisibility(inputId) {
     const input = document.getElementById(inputId);
-    if (input) input.type = input.type === 'password' ? 'text' : 'password';
+    if (!input) return;
+    input.type = input.type === 'password' ? 'text' : 'password';
 }
 
 // ==========================================================================
@@ -163,8 +165,7 @@ async function apiFetch(url, options = {}) {
     const res = await fetch(url, options);
     if (res.status === 401) {
         showLoginView();
-        showToast('Your admin session has expired. Please sign in again.', 'danger');
-        throw new Error('Session expired.');
+        throw new Error('Unauthorized');
     }
     return res;
 }
@@ -175,23 +176,20 @@ function showToast(message, type = 'info') {
 
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
-    toast.innerHTML = `
-        <span class="toast-icon">${type === 'success' ? '✓' : type === 'danger' ? '✕' : 'ℹ'}</span>
-        <span class="toast-message">${escapeHtml(message)}</span>
-    `;
-
+    toast.textContent = message;
     container.appendChild(toast);
 
     setTimeout(() => {
         toast.style.opacity = '0';
         toast.style.transform = 'translateY(-10px)';
-        setTimeout(() => toast.remove(), 250);
+        toast.style.transition = 'all 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
     }, 4000);
 }
 
-function escapeHtml(text) {
-    if (!text) return '';
-    return String(text)
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
@@ -199,391 +197,103 @@ function escapeHtml(text) {
         .replace(/'/g, '&#039;');
 }
 
-function formatDate(dateStr) {
-    if (!dateStr) return 'Never';
-    const d = new Date(dateStr);
-    return isNaN(d.getTime()) ? 'Invalid Date' : d.toLocaleString();
-}
-
-// ==========================================================================
-// DASHBOARD
-// ==========================================================================
-
-async function loadDashboard() {
-    const actBox = document.getElementById('dashboard-activations');
-    const auditBox = document.getElementById('dashboard-audit');
-
+function formatDate(isoStr) {
+    if (!isoStr) return 'Never';
     try {
-        const res = await apiFetch('/api/v1/admin/dashboard');
-        const data = await res.json();
-
-        // Update top metrics
-        const actClients = document.getElementById('metric-active-clients');
-        if (actClients) actClients.textContent = data.activeClientsCount || 0;
-
-        const actKeys = document.getElementById('metric-active-keys');
-        if (actKeys) actKeys.textContent = data.activeKeysCount || 0;
-
-        const wgServers = document.getElementById('metric-wg-servers');
-        if (wgServers) wgServers.textContent = data.wireGuardServersCount || 0;
-
-        const ovpnServers = document.getElementById('metric-ovpn-servers');
-        if (ovpnServers) ovpnServers.textContent = data.openVpnServersCount || 0;
-
-        const genEl = document.getElementById('metric-generation');
-        if (genEl) genEl.textContent = `Gen ${data.currentGeneration || 1}`;
-
-        // Render Recent Activations
-        if (actBox) {
-            if (data.recentActivations && data.recentActivations.length > 0) {
-                actBox.innerHTML = `
-                    <div class="item-list">
-                        ${data.recentActivations.map(c => `
-                            <div class="list-row">
-                                <div class="row-main">
-                                    <div class="row-title-line">
-                                        <span class="row-title">${escapeHtml(c.clientId ? c.clientId.substring(0, 12) + '...' : 'Client')}</span>
-                                        <span class="badge ${c.isActive ? 'badge-active' : 'badge-revoked'}">${c.isActive ? 'Active' : 'Revoked'}</span>
-                                        <span class="badge ${c.accessKeyType === 'GROUP' ? 'badge-group' : 'badge-single'}">${escapeHtml(c.accessKeyType || 'SINGLE')}</span>
-                                    </div>
-                                    <div class="row-meta">
-                                        <span>Key: ${escapeHtml(c.accessKeyName || 'Direct')}</span>
-                                        <span>${formatDate(c.enrolledAtUtc)}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                `;
-            } else {
-                actBox.innerHTML = '<div class="empty-state">No client activations recorded yet.</div>';
-            }
-        }
-
-        // Render Recent Audit
-        if (auditBox) {
-            if (data.recentAudit && data.recentAudit.length > 0) {
-                auditBox.innerHTML = `
-                    <div class="item-list">
-                        ${data.recentAudit.map(a => `
-                            <div class="list-row">
-                                <div class="row-main">
-                                    <div class="row-title-line">
-                                        <span class="row-title">${escapeHtml(a.action)}</span>
-                                        <span class="badge badge-single">${escapeHtml(a.actor)}</span>
-                                    </div>
-                                    <div class="row-meta">
-                                        <span>${formatDate(a.timestampUtc)}</span>
-                                        <span>IP: ${escapeHtml(a.clientIp)}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                `;
-            } else {
-                auditBox.innerHTML = '<div class="empty-state">No security audit events recorded yet.</div>';
-            }
-        }
-    } catch (e) {
-        if (actBox) actBox.innerHTML = '<div class="empty-state">Unable to load dashboard data.<br><button class="btn btn-secondary btn-sm mt-2" onclick="loadDashboard()">Retry</button></div>';
-    }
-}
-
-// ==========================================================================
-// ACCESS KEYS
-// ==========================================================================
-
-async function loadAccessKeys() {
-    const container = document.getElementById('access-keys-container');
-    if (!container) return;
-    container.innerHTML = '<div class="loading-state">Loading access keys...</div>';
-
-    try {
-        const res = await apiFetch('/api/v1/admin/access-keys');
-        currentKeysList = await res.json();
-        renderAccessKeys();
-    } catch (e) {
-        container.innerHTML = '<div class="empty-state">Unable to load access keys.<br><button class="btn btn-secondary btn-sm mt-2" onclick="loadAccessKeys()">Retry</button></div>';
-    }
-}
-
-function renderAccessKeys() {
-    const container = document.getElementById('access-keys-container');
-    if (!container) return;
-
-    if (!currentKeysList || currentKeysList.length === 0) {
-        container.innerHTML = '<div class="empty-state">No access keys found. Click "Generate Access Key" above to create one.</div>';
-        return;
-    }
-
-    container.innerHTML = `
-        <div class="item-list">
-            ${currentKeysList.map(k => `
-                <div class="list-row">
-                    <div class="row-main">
-                        <div class="row-title-line">
-                            <span class="row-title">${escapeHtml(k.name)}</span>
-                            <span class="badge badge-${(k.status || 'active').toLowerCase()}">${escapeHtml(k.status)}</span>
-                            <span class="badge ${k.type === 'GROUP' ? 'badge-group' : 'badge-single'}">${k.type === 'GROUP' ? 'Group Key' : 'Single-Use'}</span>
-                        </div>
-                        <div class="row-meta">
-                            <span>Uses: <strong>${k.useCount} / ${k.maxUses !== null ? k.maxUses : '∞'}</strong></span>
-                            <span>Expires: ${formatDate(k.expiresAtUtc)}</span>
-                            <span>Created: ${formatDate(k.createdAtUtc)}</span>
-                        </div>
-                    </div>
-                    <div class="row-actions">
-                        <button class="btn btn-secondary btn-sm" onclick="showKeyUsage('${k.id}')">Usage</button>
-                        ${k.status === 'Active' ? `
-                            <button class="btn btn-secondary btn-sm" onclick="disableKey('${k.id}')">Disable</button>
-                        ` : k.status === 'Disabled' ? `
-                            <button class="btn btn-secondary btn-sm" onclick="enableKey('${k.id}')">Enable</button>
-                        ` : ''}
-                        ${k.status !== 'Revoked' ? `
-                            <button class="btn btn-danger btn-sm" onclick="promptRevokeKey('${k.id}', '${escapeHtml(k.name)}')">Revoke</button>
-                        ` : ''}
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-    `;
-}
-
-function openGenerateKeyModal() {
-    document.getElementById('generate-key-modal')?.classList.remove('hidden');
-    document.getElementById('key-name').value = '';
-    document.getElementById('key-type').value = 'SINGLE_USE';
-    document.getElementById('key-expiration').value = '30d';
-    document.getElementById('key-custom-expiration')?.classList.add('hidden');
-    document.getElementById('group-key-options')?.classList.add('hidden');
-}
-
-function closeGenerateKeyModal() {
-    document.getElementById('generate-key-modal')?.classList.add('hidden');
-}
-
-function toggleKeyTypeOptions() {
-    const isGroup = document.getElementById('key-type').value === 'GROUP';
-    document.getElementById('group-key-options')?.classList.toggle('hidden', !isGroup);
-}
-
-function toggleCustomExpiration() {
-    const isCustom = document.getElementById('key-expiration').value === 'custom';
-    document.getElementById('key-custom-expiration')?.classList.toggle('hidden', !isCustom);
-}
-
-async function handleGenerateKey(e) {
-    e.preventDefault();
-    const btn = document.getElementById('submit-gen-key-btn');
-    btn.disabled = true;
-    btn.textContent = 'Generating...';
-
-    const name = document.getElementById('key-name').value.trim();
-    const type = document.getElementById('key-type').value;
-    const expiration = document.getElementById('key-expiration').value;
-    const customDate = document.getElementById('key-custom-expiration').value;
-    const maxUsesVal = document.getElementById('key-max-uses').value;
-
-    try {
-        const res = await apiFetch('/api/v1/admin/access-keys', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name,
-                type,
-                expiration,
-                customExpiresAtUtc: customDate ? new Date(customDate).toISOString() : null,
-                maxUses: maxUsesVal ? parseInt(maxUsesVal, 10) : null
-            })
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return 'Never';
+        return d.toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
         });
-
-        const data = await res.json();
-        if (res.ok && data.success) {
-            closeGenerateKeyModal();
-            showToast(`Key generated: ${data.plaintextCode || data.accessKey}`, 'success');
-            loadAccessKeys();
-            loadDashboard();
-        } else {
-            showToast(data.error || 'Failed to generate key.', 'danger');
-        }
-    } catch (err) {
-        showToast('Error generating access key.', 'danger');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Generate Key';
+    } catch {
+        return isoStr;
     }
 }
 
-async function disableKey(id) {
-    try {
-        const res = await apiFetch(`/api/v1/admin/access-keys/${id}/disable`, { method: 'POST' });
-        if (res.ok) {
-            showToast('Access key disabled.', 'success');
-            loadAccessKeys();
-        }
-    } catch (e) { }
-}
+// ==========================================================================
+// DRAG & DROP HANDLING
+// ==========================================================================
 
-async function enableKey(id) {
-    try {
-        const res = await apiFetch(`/api/v1/admin/access-keys/${id}/enable`, { method: 'POST' });
-        if (res.ok) {
-            showToast('Access key enabled.', 'success');
-            loadAccessKeys();
-        }
-    } catch (e) { }
-}
-
-async function promptRevokeKey(id, name) {
-    if (confirm(`Revoke key "${name}" and all associated clients?`)) {
-        try {
-            const res = await apiFetch(`/api/v1/admin/access-keys/${id}/revoke`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ revokeClients: true })
+function setupDragAndDrop() {
+    const ovpnDropzone = document.getElementById('ovpn-dropzone');
+    if (ovpnDropzone) {
+        ['dragenter', 'dragover'].forEach(name => {
+            ovpnDropzone.addEventListener(name, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                ovpnDropzone.classList.add('dragover');
             });
-            if (res.ok) {
-                showToast('Key revoked.', 'success');
-                loadAccessKeys();
-                loadDashboard();
+        });
+        ['dragleave', 'drop'].forEach(name => {
+            ovpnDropzone.addEventListener(name, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                ovpnDropzone.classList.remove('dragover');
+            });
+        });
+        ovpnDropzone.addEventListener('drop', (e) => {
+            const files = e.dataTransfer?.files;
+            if (files && files.length > 0) {
+                processOvpnFile(files[0]);
             }
-        } catch (e) { }
+        });
+    }
+
+    const wgDropzone = document.getElementById('wg-dropzone');
+    if (wgDropzone) {
+        ['dragenter', 'dragover'].forEach(name => {
+            wgDropzone.addEventListener(name, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                wgDropzone.classList.add('dragover');
+            });
+        });
+        ['dragleave', 'drop'].forEach(name => {
+            wgDropzone.addEventListener(name, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                wgDropzone.classList.remove('dragover');
+            });
+        });
+        wgDropzone.addEventListener('drop', (e) => {
+            const files = e.dataTransfer?.files;
+            if (files && files.length > 0) {
+                processWgConfFile(files[0]);
+            }
+        });
+    }
+
+    const bulkDropzone = document.getElementById('bulk-dropzone');
+    if (bulkDropzone) {
+        ['dragenter', 'dragover'].forEach(name => {
+            bulkDropzone.addEventListener(name, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                bulkDropzone.classList.add('dragover');
+            });
+        });
+        ['dragleave', 'drop'].forEach(name => {
+            bulkDropzone.addEventListener(name, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                bulkDropzone.classList.remove('dragover');
+            });
+        });
+        bulkDropzone.addEventListener('drop', (e) => {
+            const files = Array.from(e.dataTransfer?.files || []);
+            if (files.length > 0) {
+                handleBulkFilesDrop(files);
+            }
+        });
     }
 }
 
-async function showKeyUsage(id) {
-    try {
-        const res = await apiFetch(`/api/v1/admin/access-keys/${id}/usage`);
-        const data = await res.json();
-        const modal = document.getElementById('key-usage-modal');
-        const body = document.getElementById('key-usage-modal-body');
-        document.getElementById('key-usage-modal-title').textContent = `Activations for "${data.key?.name || 'Key'}"`;
-
-        if (!data.clients || data.clients.length === 0) {
-            body.innerHTML = '<div class="empty-state">No clients have activated using this key yet.</div>';
-        } else {
-            body.innerHTML = `
-                <div class="item-list">
-                    ${data.clients.map(c => `
-                        <div class="list-row">
-                            <div class="row-main">
-                                <div class="row-title-line">
-                                    <span class="row-title"><code>${escapeHtml(c.clientId)}</code></span>
-                                    <span class="badge ${c.isActive ? 'badge-active' : 'badge-revoked'}">${c.isActive ? 'Active' : 'Revoked'}</span>
-                                </div>
-                                <div class="row-meta">
-                                    <span>IP: ${escapeHtml(c.registeredIp)}</span>
-                                    <span>Enrolled: ${formatDate(c.enrolledAtUtc)}</span>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-        }
-        modal.classList.remove('hidden');
-    } catch (e) { }
-}
-
-function closeKeyUsageModal() {
-    document.getElementById('key-usage-modal')?.classList.add('hidden');
-}
-
 // ==========================================================================
-// CLIENTS
-// ==========================================================================
-
-async function loadClients() {
-    const container = document.getElementById('clients-container');
-    if (!container) return;
-    container.innerHTML = '<div class="loading-state">Loading enrolled clients...</div>';
-
-    try {
-        const res = await apiFetch('/api/v1/admin/clients');
-        currentClientsList = await res.json();
-        filterClients();
-    } catch (e) {
-        container.innerHTML = '<div class="empty-state">Unable to load enrolled clients.<br><button class="btn btn-secondary btn-sm mt-2" onclick="loadClients()">Retry</button></div>';
-    }
-}
-
-function filterClients() {
-    const container = document.getElementById('clients-container');
-    if (!container) return;
-
-    const search = (document.getElementById('client-search')?.value || '').toLowerCase().trim();
-    const status = document.getElementById('client-status-filter')?.value || '';
-
-    let filtered = (currentClientsList || []).filter(c => {
-        if (status === 'active' && !c.isActive) return false;
-        if (status === 'revoked' && c.isActive) return false;
-        if (search) {
-            const matchId = (c.clientId || '').toLowerCase().includes(search);
-            const matchIp = (c.registeredIp || '').toLowerCase().includes(search);
-            const matchKey = (c.accessKeyName || '').toLowerCase().includes(search);
-            if (!matchId && !matchIp && !matchKey) return false;
-        }
-        return true;
-    });
-
-    if (filtered.length === 0) {
-        container.innerHTML = '<div class="empty-state">No enrolled clients match the current filter.</div>';
-        return;
-    }
-
-    container.innerHTML = `
-        <div class="item-list">
-            ${filtered.map(c => `
-                <div class="list-row">
-                    <div class="row-main">
-                        <div class="row-title-line">
-                            <span class="row-title"><code>${escapeHtml((c.clientId || '').substring(0, 16))}...</code></span>
-                            <span class="badge ${c.isActive ? 'badge-active' : 'badge-revoked'}">${c.isActive ? 'Active' : 'Revoked'}</span>
-                            <span class="badge badge-single">${escapeHtml(c.accessKeyName || 'Direct Ticket')}</span>
-                        </div>
-                        <div class="row-meta">
-                            <span>IP: ${escapeHtml(c.registeredIp || 'Unknown')}</span>
-                            <span>Enrolled: ${formatDate(c.enrolledAtUtc)}</span>
-                        </div>
-                    </div>
-                    <div class="row-actions">
-                        ${c.isActive ? `
-                            <button class="btn btn-danger btn-sm" onclick="revokeClient('${c.clientId}')">Revoke</button>
-                        ` : `
-                            <button class="btn btn-secondary btn-sm" onclick="restoreClient('${c.clientId}')">Restore</button>
-                        `}
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-    `;
-}
-
-async function revokeClient(clientId) {
-    try {
-        const res = await apiFetch(`/api/v1/admin/clients/${clientId}/revoke`, { method: 'POST' });
-        if (res.ok) {
-            showToast('Client revoked.', 'success');
-            loadClients();
-            loadDashboard();
-        }
-    } catch (e) { }
-}
-
-async function restoreClient(clientId) {
-    try {
-        const res = await apiFetch(`/api/v1/admin/clients/${clientId}/restore`, { method: 'POST' });
-        if (res.ok) {
-            showToast('Client restored.', 'success');
-            loadClients();
-            loadDashboard();
-        }
-    } catch (e) { }
-}
-
-// ==========================================================================
-// SERVERS & DUAL-PROTOCOL SUPPORT (WIREGUARD + OPENVPN)
+// SERVERS & DUAL-PROTOCOL (WIREGUARD + OPENVPN)
 // ==========================================================================
 
 function switchProtocolTab(protocol) {
@@ -604,12 +314,14 @@ async function loadServers() {
     container.innerHTML = '<div class="loading-state">Loading servers...</div>';
 
     try {
-        const [serversRes, statusRes] = await Promise.all([
+        const [serversRes, statusRes, credsRes] = await Promise.all([
             apiFetch('/api/v1/admin/servers'),
-            apiFetch('/api/v1/admin/servers/publication-status')
+            apiFetch('/api/v1/admin/servers/publication-status'),
+            apiFetch('/api/v1/admin/openvpn/credential-sets')
         ]);
         currentServersList = await serversRes.json();
         currentPublicationStatus = await statusRes.json();
+        currentCredentialSetsList = await credsRes.json();
 
         // Update protocol count badges
         const wgCount = (currentServersList || []).filter(s => (s.protocol || 'WIREGUARD').toUpperCase() === 'WIREGUARD').length;
@@ -621,34 +333,48 @@ async function loadServers() {
         const ovpnBadge = document.getElementById('ovpn-count-badge');
         if (ovpnBadge) ovpnBadge.textContent = ovpnCount;
 
-        // Update Publication Status Banner & Publish Buttons
-        const banner = document.getElementById('servers-publish-banner');
-        const summaryText = document.getElementById('servers-publish-summary-text');
+        // Update Top Bar Summary Chips
+        const topGen = document.getElementById('top-bar-gen');
+        if (topGen) {
+            topGen.textContent = currentPublicationStatus.activeGeneration > 0 ? `#${currentPublicationStatus.activeGeneration}` : 'None';
+        }
+
+        const topPublished = document.getElementById('top-bar-published-count');
+        if (topPublished) {
+            topPublished.textContent = currentPublicationStatus.activeGenerationCount || 0;
+        }
+
+        const topUnpublished = document.getElementById('top-bar-unpublished-count');
+        const topUnpublishedChip = document.getElementById('top-bar-unpublished-chip');
+        const topPubAllBtn = document.getElementById('top-bar-publish-all-btn');
         const wgPubBtn = document.getElementById('wg-publish-btn');
         const ovpnPubBtn = document.getElementById('ovpn-publish-btn');
 
+        const pendingCount = (currentPublicationStatus.pendingAdditionsCount || 0) +
+                             (currentPublicationStatus.pendingModificationsCount || 0) +
+                             (currentPublicationStatus.pendingDeletionsCount || 0);
+
+        if (topUnpublished) topUnpublished.textContent = pendingCount;
+
         if (currentPublicationStatus && currentPublicationStatus.hasPendingChanges) {
-            const pendingCount = (currentPublicationStatus.pendingAdditionsCount || 0) +
-                                 (currentPublicationStatus.pendingModificationsCount || 0) +
-                                 (currentPublicationStatus.pendingDeletionsCount || 0);
-            if (banner) {
-                banner.classList.remove('hidden');
-                if (summaryText) {
-                    const genText = currentPublicationStatus.activeGeneration > 0 ? `Active Generation #${currentPublicationStatus.activeGeneration}` : 'No Active Generation';
-                    summaryText.textContent = `${pendingCount} unpublished registry changes differ from ${genText}.`;
-                }
+            if (topUnpublishedChip) {
+                topUnpublishedChip.className = 'chip chip-warning';
             }
+            if (topPubAllBtn) topPubAllBtn.classList.remove('hidden');
             if (wgPubBtn) wgPubBtn.classList.remove('hidden');
             if (ovpnPubBtn) ovpnPubBtn.classList.remove('hidden');
         } else {
-            if (banner) banner.classList.add('hidden');
+            if (topUnpublishedChip) {
+                topUnpublishedChip.className = 'chip';
+            }
+            if (topPubAllBtn) topPubAllBtn.classList.add('hidden');
             if (wgPubBtn) wgPubBtn.classList.add('hidden');
             if (ovpnPubBtn) ovpnPubBtn.classList.add('hidden');
         }
 
         renderServers();
     } catch (e) {
-        container.innerHTML = '<div class="empty-state">Unable to load servers registry.<br><button class="btn btn-secondary btn-sm mt-2" onclick="loadServers()">Retry</button></div>';
+        container.innerHTML = '<div class="empty-state">Unable to load servers.<br><button class="btn btn-secondary btn-sm mt-2" onclick="loadServers()">Retry</button></div>';
     }
 }
 
@@ -657,67 +383,90 @@ function renderServers() {
     if (!container) return;
 
     const filtered = (currentServersList || []).filter(s => {
-        const proto = (s.protocol || 'WIREGUARD').toUpperCase();
-        return proto === currentProtocolTab;
+        const p = (s.protocol || 'WIREGUARD').toUpperCase();
+        return p === currentProtocolTab;
     });
 
     if (filtered.length === 0) {
-        const isWg = currentProtocolTab === 'WIREGUARD';
-        container.innerHTML = `
-            <div class="empty-state">
-                No ${isWg ? 'WireGuard (.conf)' : 'OpenVPN (.ovpn)'} servers found in registry.<br>
-                Click <strong>"${isWg ? 'Add WireGuard Server' : 'Add OpenVPN Server'}"</strong> above to import.
-            </div>
-        `;
+        if (currentProtocolTab === 'WIREGUARD') {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <p style="font-size: 15px; font-weight: 600; color: #F1F5F9; margin-bottom: 6px;">No WireGuard servers configured</p>
+                    <p class="text-secondary" style="font-size: 13px; margin-bottom: 16px;">Add a WireGuard server using a .conf configuration file.</p>
+                    <button class="btn btn-primary" onclick="openAddServerModal()">+ Add WireGuard Server</button>
+                </div>
+            `;
+        } else {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <p style="font-size: 15px; font-weight: 600; color: #F1F5F9; margin-bottom: 6px;">No OpenVPN servers configured</p>
+                    <p class="text-secondary" style="font-size: 13px; margin-bottom: 16px;">Add an OpenVPN server using a .ovpn configuration file.</p>
+                    <button class="btn btn-primary" onclick="openAddOpenVpnModal()">+ Add OpenVPN Server</button>
+                </div>
+            `;
+        }
         return;
     }
 
     container.innerHTML = `
         <div class="item-list">
             ${filtered.map(s => {
-                const isOvpn = (s.protocol || '').toUpperCase() === 'OPENVPN';
-                const provider = s.provider || 'Custom';
-                const providerBadgeClass = provider.toLowerCase().includes('proton') ? 'badge-proton' :
-                                           provider.toLowerCase().includes('vpnbook') ? 'badge-vpnbook' : 'badge-custom';
-                const serverId = s.id || s.serverId || 'srv';
+                const isWg = (s.protocol || 'WIREGUARD').toUpperCase() === 'WIREGUARD';
+                const providerBadgeClass = s.provider === 'Proton' ? 'badge-proton' : (s.provider === 'VPNBook' ? 'badge-vpnbook' : 'badge-custom');
+                const protoBadgeClass = isWg ? 'badge-single' : (s.port === 443 || (s.endpoint && s.endpoint.includes('443')) ? 'badge-tcp' : 'badge-udp');
+                const protoLabel = isWg ? 'WIREGUARD' : 'OPENVPN';
+
+                // Credential Set lookup for OpenVPN
+                let credSetLabel = '';
+                if (!isWg) {
+                    if (s.credentialSetId) {
+                        const cs = currentCredentialSetsList.find(c => c.id === s.credentialSetId);
+                        credSetLabel = cs ? `🔑 Credential Set: ${escapeHtml(cs.name)}` : `🔑 Credential Set: Linked`;
+                    } else {
+                        credSetLabel = `🔒 Inline / Cert`;
+                    }
+                }
 
                 // Publication Status Badge
                 let pubBadge = '';
-                if (s.publicationStatus === 'PUBLISHED') {
-                    pubBadge = `<span class="badge badge-active" title="Included in Active Generation #${s.activeGeneration}">Active Gen #${s.activeGeneration}</span>`;
+                if (!s.enabled) {
+                    pubBadge = `<span class="badge badge-revoked">DISABLED</span>`;
+                } else if (s.publicationStatus === 'PUBLISHED') {
+                    pubBadge = `<span class="badge badge-active">✓ PUBLISHED (GEN #${s.activeGeneration})</span>`;
                 } else if (s.publicationStatus === 'PENDING_CHANGES') {
-                    pubBadge = `<span class="badge badge-warning" style="background: rgba(245, 158, 11, 0.2); color: #FCD34D; border: 1px solid #F59E0B;" title="Modified since last publication">Unpublished Changes</span>`;
-                } else if (s.publicationStatus === 'NOT_PUBLISHED') {
-                    pubBadge = `<span class="badge badge-warning" style="background: rgba(245, 158, 11, 0.2); color: #FCD34D; border: 1px solid #F59E0B;" title="Not included in active generation">Not in Active Gen</span>`;
+                    pubBadge = `<span class="badge badge-group">⚡ UNPUBLISHED CHANGES</span>`;
                 } else {
-                    pubBadge = `<span class="badge badge-expired">Disabled</span>`;
+                    pubBadge = `<span class="badge badge-expired">⚠️ NOT PUBLISHED</span>`;
                 }
+
+                const endpointDisplay = s.endpoint ? (s.port ? `${s.endpoint}:${s.port}` : s.endpoint) : 'Endpoint Configured';
 
                 return `
                     <div class="list-row">
                         <div class="row-main">
                             <div class="row-title-line">
                                 <span class="row-title">${escapeHtml(s.name)}</span>
-                                <span class="badge ${s.enabled ? 'badge-active' : 'badge-expired'}">${s.enabled ? 'Enabled' : 'Disabled'}</span>
+                                <span class="badge ${protoBadgeClass}">${protoLabel}</span>
+                                <span class="badge ${providerBadgeClass}">${escapeHtml(s.provider || 'Custom')}</span>
                                 ${pubBadge}
-                                <span class="badge ${isOvpn ? 'badge-warning' : 'badge-accent'}">${isOvpn ? '🔒 OpenVPN' : '⚡ WireGuard'}</span>
-                                <span class="badge ${providerBadgeClass}">${escapeHtml(provider)}</span>
-                                <span class="badge badge-single">${escapeHtml(s.countryCode || s.country || 'Global')}</span>
                             </div>
                             <div class="row-meta">
-                                <span>ID: <code>${escapeHtml(serverId)}</code></span>
-                                <span>Region: <strong>${escapeHtml(s.region || s.country || 'Default')}</strong></span>
-                                ${s.city ? `<span>City: ${escapeHtml(s.city)}</span>` : ''}
-                                ${s.credentialSetId ? `<span class="badge badge-credset">Linked Credentials</span>` : ''}
+                                <span>📍 ${escapeHtml(s.country || s.region || 'US')} (${escapeHtml(s.countryCode || 'US')})</span>
+                                <span>🌐 ${escapeHtml(endpointDisplay)}</span>
+                                ${credSetLabel ? `<span class="badge badge-credset" style="font-size: 10px;">${credSetLabel}</span>` : ''}
                             </div>
                         </div>
                         <div class="row-actions">
+                            <button class="btn btn-secondary btn-sm" onclick="editServerModal('${s.serverId}', '${s.protocol}')">Edit</button>
                             ${s.enabled ? `
-                                <button class="btn btn-secondary btn-sm" onclick="disableServer('${serverId}')">Disable</button>
+                                <button class="btn btn-secondary btn-sm" onclick="disableServer('${s.serverId}')">Disable</button>
                             ` : `
-                                <button class="btn btn-secondary btn-sm" onclick="enableServer('${serverId}')">Enable</button>
+                                <button class="btn btn-secondary btn-sm" onclick="enableServer('${s.serverId}')">Enable</button>
                             `}
-                            <button class="btn btn-danger btn-sm" onclick="promptDeleteServer('${serverId}', '${escapeHtml(s.name)}')">Delete</button>
+                            ${(s.publicationStatus === 'NOT_PUBLISHED' || s.publicationStatus === 'PENDING_CHANGES') ? `
+                                <button class="btn btn-primary btn-sm btn-publish-highlight" onclick="publishSingleServer('${s.serverId}')" title="Publish Server">⚡ Publish</button>
+                            ` : ''}
+                            <button class="btn btn-danger btn-sm" onclick="promptDeleteServer('${s.serverId}', '${escapeHtml(s.name)}')">Delete</button>
                         </div>
                     </div>
                 `;
@@ -726,18 +475,23 @@ function renderServers() {
     `;
 }
 
-// ----------------------------------------------------
-// WIREGUARD SERVER MODAL
-// ----------------------------------------------------
+// ==========================================================================
+// WIREGUARD MODAL & FORM
+// ==========================================================================
 
 function openAddServerModal() {
-    document.getElementById('add-server-modal')?.classList.remove('hidden');
+    document.getElementById('wg-modal-title').textContent = 'Add WireGuard Server';
+    document.getElementById('wg-edit-server-id').value = '';
     document.getElementById('server-display-name').value = '';
-    document.getElementById('server-country').value = 'US';
+    document.getElementById('server-country').value = 'United States';
+    document.getElementById('server-country-code').value = 'US';
     document.getElementById('server-region').value = '';
     document.getElementById('server-provider').value = 'Custom';
     document.getElementById('server-conf-text').value = '';
     document.getElementById('server-conf-file').value = '';
+    document.getElementById('wg-conf-group')?.classList.remove('hidden');
+    document.getElementById('wg-validation-box')?.classList.add('hidden');
+    document.getElementById('add-server-modal')?.classList.remove('hidden');
 }
 
 function closeAddServerModal() {
@@ -745,108 +499,186 @@ function closeAddServerModal() {
 }
 
 function handleConfFileSelect(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+    const file = e.target.files?.[0];
+    if (file) processWgConfFile(file);
+}
 
+function processWgConfFile(file) {
+    const fname = file.name.replace(/\.(conf|txt)$/i, '');
+    if (!document.getElementById('server-display-name').value) {
+        document.getElementById('server-display-name').value = fname;
+    }
     const reader = new FileReader();
     reader.onload = (event) => {
         document.getElementById('server-conf-text').value = event.target.result;
+        validateWireGuardLive();
     };
     reader.readAsText(file);
 }
 
-async function submitWireGuardForm(publishImmediately) {
-    const displayName = document.getElementById('server-display-name').value.trim();
-    const country = document.getElementById('server-country').value.trim();
-    const region = document.getElementById('server-region').value.trim();
-    const provider = document.getElementById('server-provider').value.trim() || 'Custom';
-    const confContent = document.getElementById('server-conf-text').value.trim();
+function validateWireGuardLive() {
+    clearTimeout(wgValidationDebounceTimer);
+    wgValidationDebounceTimer = setTimeout(() => {
+        const text = document.getElementById('server-conf-text')?.value.trim() || '';
+        const box = document.getElementById('wg-validation-box');
+        const grid = document.getElementById('wg-val-grid');
+        const title = document.getElementById('wg-val-status-title');
+        const errMsg = document.getElementById('wg-val-error-msg');
 
-    if (!displayName || !country || !confContent) {
-        showToast('Please fill in all required fields.', 'danger');
-        return;
-    }
-
-    if (publishImmediately) {
-        if (!confirm('Save WireGuard server and immediately compile & publish a new generation to all active clients?')) {
+        if (!text) {
+            box?.classList.add('hidden');
             return;
         }
+
+        box?.classList.remove('hidden');
+        const hasInterface = /\[Interface\]/i.test(text);
+        const hasPeer = /\[Peer\]/i.test(text);
+        const hasPrivKey = /PrivateKey\s*=/i.test(text);
+        const hasPubKey = /PublicKey\s*=/i.test(text);
+        const hasEndpoint = /Endpoint\s*=/i.test(text);
+
+        if (hasInterface && hasPeer && hasPrivKey && hasPubKey && hasEndpoint) {
+            if (box) box.className = 'validation-preview valid';
+            if (title) title.innerHTML = '<span>✅</span> WireGuard Configuration Validated';
+            if (errMsg) errMsg.classList.add('hidden');
+            if (grid) {
+                grid.innerHTML = `
+                    <div class="val-item">
+                        <div class="val-label">Protocol</div>
+                        <div class="val-value"><span class="badge badge-single">WIREGUARD</span></div>
+                    </div>
+                    <div class="val-item">
+                        <div class="val-label">Keys</div>
+                        <div class="val-value text-success">Interface &amp; Peer Present</div>
+                    </div>
+                    <div class="val-item">
+                        <div class="val-label">Endpoint</div>
+                        <div class="val-value text-success">Configured</div>
+                    </div>
+                    <div class="val-item">
+                        <div class="val-label">Ready to Publish</div>
+                        <div class="val-value text-success">YES</div>
+                    </div>
+                `;
+            }
+        } else {
+            if (box) box.className = 'validation-preview invalid';
+            if (title) title.innerHTML = '<span>⚠️</span> Incomplete Configuration';
+            if (errMsg) {
+                errMsg.textContent = 'Configuration must include [Interface] (with PrivateKey) and [Peer] (with PublicKey and Endpoint).';
+                errMsg.classList.remove('hidden');
+            }
+            if (grid) grid.innerHTML = '';
+        }
+    }, 200);
+}
+
+async function submitWireGuardForm(publishImmediately) {
+    const editId = document.getElementById('wg-edit-server-id').value;
+    const displayName = document.getElementById('server-display-name').value.trim();
+    const country = document.getElementById('server-country').value.trim();
+    const countryCode = document.getElementById('server-country-code').value.trim();
+    const region = document.getElementById('server-region').value.trim();
+    const provider = document.getElementById('server-provider').value.trim();
+    const confContent = document.getElementById('server-conf-text').value.trim();
+
+    if (!displayName || !country || (!editId && !confContent)) {
+        showToast('Please fill in all required fields.', 'danger');
+        return;
     }
 
     const btn = publishImmediately ? document.getElementById('submit-add-server-publish-btn') : document.getElementById('submit-add-server-save-btn');
     if (btn) {
         btn.disabled = true;
-        btn.textContent = publishImmediately ? 'Saving & Publishing...' : 'Saving...';
+        btn.textContent = publishImmediately ? 'Publishing...' : 'Saving...';
     }
 
     try {
-        const res = await apiFetch('/api/v1/admin/servers', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ displayName, country, region, provider, confContent, publishImmediately })
-        });
+        let res;
+        if (editId) {
+            res = await apiFetch(`/api/v1/admin/servers/${editId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    displayName,
+                    region: region || country,
+                    enabled: true,
+                    publishImmediately
+                })
+            });
+        } else {
+            res = await apiFetch('/api/v1/admin/servers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    displayName,
+                    country,
+                    countryCode,
+                    region: region || country,
+                    provider,
+                    confContent,
+                    publishImmediately
+                })
+            });
+        }
 
         const data = await res.json();
         if (res.ok && data.success) {
             closeAddServerModal();
-            showToast(data.message || 'WireGuard server added.', 'success');
+            if (publishImmediately && data.published) {
+                showPublishSuccessModal(displayName, 'WIREGUARD', data.generation);
+            } else {
+                showToast(data.message || 'WireGuard server saved.', 'success');
+            }
             loadServers();
             loadGenerations();
             loadDashboard();
         } else {
-            showToast(data.error || 'Failed to add server.', 'danger');
+            showToast(data.error || 'Failed to save WireGuard server.', 'danger');
         }
-    } catch (err) {
-        showToast('Error adding WireGuard server.', 'danger');
+    } catch {
+        showToast('Error saving WireGuard server.', 'danger');
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.textContent = publishImmediately ? 'Save & Publish' : 'Save Only';
+            btn.textContent = publishImmediately ? '⚡ SAVE & PUBLISH' : 'Save Draft';
         }
     }
 }
 
-// ----------------------------------------------------
-// OPENVPN SERVER MODAL
-// ----------------------------------------------------
+// ==========================================================================
+// OPENVPN MODAL, LIVE VALIDATION & SAME-PAGE PUBLISHING
+// ==========================================================================
 
 async function openAddOpenVpnModal() {
-    document.getElementById('add-openvpn-modal')?.classList.remove('hidden');
+    document.getElementById('ovpn-modal-title').textContent = 'Add OpenVPN Server (.ovpn)';
+    document.getElementById('ovpn-edit-server-id').value = '';
     document.getElementById('ovpn-display-name').value = '';
-    document.getElementById('ovpn-country').value = '';
-    document.getElementById('ovpn-country-code').value = '';
+    document.getElementById('ovpn-country').value = 'United States';
+    document.getElementById('ovpn-country-code').value = 'US';
     document.getElementById('ovpn-city').value = '';
-    document.getElementById('ovpn-provider').value = 'Custom';
+    document.getElementById('ovpn-provider').value = 'VPNBook';
     document.getElementById('ovpn-file-text').value = '';
+    document.getElementById('ovpn-file-input').value = '';
+    document.getElementById('ovpn-conf-group')?.classList.remove('hidden');
     document.getElementById('ovpn-validation-box')?.classList.add('hidden');
-    document.getElementById('ovpn-inline-creds')?.classList.add('hidden');
 
     await populateCredentialSetsDropdown('ovpn-credential-set');
+    document.getElementById('add-openvpn-modal')?.classList.remove('hidden');
 }
 
 function closeAddOpenVpnModal() {
     document.getElementById('add-openvpn-modal')?.classList.add('hidden');
 }
 
-function handleProviderChange() {
-    validateOvpnLive(false);
-}
-
-function toggleInlineCredentials() {
-    const setVal = document.getElementById('ovpn-credential-set').value;
-    const inlineBox = document.getElementById('ovpn-inline-creds');
-    if (inlineBox) {
-        inlineBox.classList.toggle('hidden', setVal !== '');
-    }
-}
-
 function handleOvpnFileSelect(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+    const file = e.target.files?.[0];
+    if (file) processOvpnFile(file);
+}
 
-    const fname = file.name.replace(/\.ovpn$/i, '');
-    const parts = fname.split(/[\.-]/);
-
+function processOvpnFile(file) {
+    const fname = file.name.replace(/\.(ovpn|conf|txt)$/i, '');
+    const parts = fname.split(/[-_\s]+/);
     if (parts.length > 0) {
         const code = parts[0].toUpperCase();
         if (code.length === 2) {
@@ -872,6 +704,10 @@ function handleOvpnFileSelect(e) {
     reader.readAsText(file);
 }
 
+function handleProviderChange() {
+    validateOvpnLive(false);
+}
+
 function validateOvpnLive(isManual = false) {
     clearTimeout(validationDebounceTimer);
 
@@ -881,7 +717,7 @@ function validateOvpnLive(isManual = false) {
         const grid = document.getElementById('val-grid');
         const title = document.getElementById('val-status-title');
         const errMsg = document.getElementById('val-error-msg');
-        const valBtn = document.getElementById('btn-validate-profile');
+        const authBadge = document.getElementById('ovpn-auth-badge');
 
         if (!text || text.length < 10) {
             if (isManual) {
@@ -892,12 +728,19 @@ function validateOvpnLive(isManual = false) {
             return;
         }
 
-        if (valBtn) {
-            valBtn.disabled = true;
-            valBtn.textContent = 'Validating...';
-        }
-
         const provider = document.getElementById('ovpn-provider')?.value || 'Custom';
+
+        // Check if config contains auth-user-pass
+        const hasAuthUserPass = /auth-user-pass/i.test(text);
+        if (authBadge) {
+            if (hasAuthUserPass) {
+                authBadge.textContent = 'Credentials Required (auth-user-pass)';
+                authBadge.className = 'badge badge-warning';
+            } else {
+                authBadge.textContent = 'Cert/Key Only';
+                authBadge.className = 'badge badge-subtle';
+            }
+        }
 
         try {
             const res = await apiFetch('/api/v1/admin/openvpn/validate', {
@@ -918,8 +761,6 @@ function validateOvpnLive(isManual = false) {
                     ? `1 Primary + ${val.additionalRemotesCount} Failover` 
                     : '1 Remote Endpoint';
 
-                const ipv6Text = val.hasIPv6 ? 'IPv4 + IPv6' : 'IPv4 Standard';
-
                 if (grid) {
                     grid.innerHTML = `
                         <div class="val-item">
@@ -939,16 +780,12 @@ function validateOvpnLive(isManual = false) {
                             <div class="val-value">${escapeHtml(val.provider || provider)}</div>
                         </div>
                         <div class="val-item">
-                            <div class="val-label">Multiple Remotes</div>
-                            <div class="val-value">${escapeHtml(remotesText)}</div>
+                            <div class="val-label">Security Directives</div>
+                            <div class="val-value text-success">PASSED</div>
                         </div>
                         <div class="val-item">
-                            <div class="val-label">IP Support</div>
-                            <div class="val-value">${escapeHtml(ipv6Text)}</div>
-                        </div>
-                        <div class="val-item">
-                            <div class="val-label">Security Policy</div>
-                            <div class="val-value text-success">Allowlist Passed</div>
+                            <div class="val-label">Ready to Publish</div>
+                            <div class="val-value text-success">READY</div>
                         </div>
                     `;
                 }
@@ -969,94 +806,298 @@ function validateOvpnLive(isManual = false) {
                     showToast(val.error || 'Configuration rejected by security policy.', 'danger');
                 }
             }
-        } catch (e) {
+        } catch {
             if (isManual) showToast('Failed to validate profile with server.', 'danger');
-        } finally {
-            if (valBtn) {
-                valBtn.disabled = false;
-                valBtn.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg> Validate Profile';
-            }
         }
     };
 
     if (isManual) {
         runValidation();
     } else {
-        validationDebounceTimer = setTimeout(runValidation, 300);
+        validationDebounceTimer = setTimeout(runValidation, 250);
     }
 }
 
 async function submitOpenVpnForm(publishImmediately) {
+    const editId = document.getElementById('ovpn-edit-server-id').value;
     const displayName = document.getElementById('ovpn-display-name').value.trim();
     const country = document.getElementById('ovpn-country').value.trim();
     const countryCode = document.getElementById('ovpn-country-code').value.trim();
     const city = document.getElementById('ovpn-city').value.trim();
     const provider = document.getElementById('ovpn-provider').value;
     const credentialSetId = document.getElementById('ovpn-credential-set').value || null;
-    const username = document.getElementById('ovpn-username').value.trim() || null;
-    const password = document.getElementById('ovpn-password').value || null;
     const ovpnContent = document.getElementById('ovpn-file-text').value.trim();
 
-    if (!displayName || !country || !countryCode || !ovpnContent) {
+    if (!displayName || !country || (!editId && !ovpnContent)) {
         showToast('Please fill in all required fields.', 'danger');
         return;
-    }
-
-    if (publishImmediately) {
-        if (!confirm('Save OpenVPN server and immediately compile & publish a new generation to all active clients?')) {
-            return;
-        }
     }
 
     const btn = publishImmediately ? document.getElementById('submit-add-ovpn-publish-btn') : document.getElementById('submit-add-ovpn-save-btn');
     if (btn) {
         btn.disabled = true;
-        btn.textContent = publishImmediately ? 'Validating & Publishing...' : 'Validating & Saving...';
+        btn.textContent = publishImmediately ? 'Publishing...' : 'Saving...';
     }
 
     try {
-        const res = await apiFetch('/api/v1/admin/servers/openvpn', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                displayName,
-                country,
-                countryCode,
-                region: city || country,
-                city,
-                provider,
-                credentialSetId,
-                username,
-                password,
-                ovpnContent,
-                publishImmediately
-            })
-        });
+        let res;
+        if (editId) {
+            res = await apiFetch(`/api/v1/admin/servers/openvpn/${editId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    displayName,
+                    region: city || country,
+                    city,
+                    provider,
+                    credentialSetId,
+                    enabled: true,
+                    publishImmediately
+                })
+            });
+        } else {
+            res = await apiFetch('/api/v1/admin/servers/openvpn', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    displayName,
+                    country,
+                    countryCode,
+                    region: city || country,
+                    city,
+                    provider,
+                    credentialSetId,
+                    ovpnContent,
+                    publishImmediately
+                })
+            });
+        }
 
         const data = await res.json();
         if (res.ok && data.success) {
             closeAddOpenVpnModal();
-            showToast(data.message || 'OpenVPN server added.', 'success');
+            if (publishImmediately && data.published) {
+                showPublishSuccessModal(displayName, 'OPENVPN', data.generation);
+            } else {
+                showToast(data.message || 'OpenVPN server saved.', 'success');
+            }
             loadServers();
             loadGenerations();
             loadDashboard();
             switchProtocolTab('OPENVPN');
         } else {
-            showToast(data.error || 'Failed to import OpenVPN profile.', 'danger');
+            showToast(data.error || 'Failed to save OpenVPN server.', 'danger');
         }
-    } catch (err) {
-        showToast('Error importing OpenVPN profile.', 'danger');
+    } catch {
+        showToast('Error saving OpenVPN server.', 'danger');
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.textContent = publishImmediately ? 'Save & Publish' : 'Save Only';
+            btn.textContent = publishImmediately ? '⚡ SAVE & PUBLISH' : 'Save Draft';
         }
     }
 }
 
-// ----------------------------------------------------
+// ==========================================================================
+// EDIT SERVER MODAL
+// ==========================================================================
+
+async function editServerModal(serverId, protocol) {
+    const isWg = (protocol || 'WIREGUARD').toUpperCase() === 'WIREGUARD';
+    const server = (currentServersList || []).find(s => s.serverId === serverId);
+    if (!server) return;
+
+    if (isWg) {
+        document.getElementById('wg-modal-title').textContent = `Edit WireGuard Server`;
+        document.getElementById('wg-edit-server-id').value = server.serverId;
+        document.getElementById('server-display-name').value = server.name;
+        document.getElementById('server-country').value = server.country || 'United States';
+        document.getElementById('server-country-code').value = server.countryCode || 'US';
+        document.getElementById('server-region').value = server.region || '';
+        document.getElementById('server-provider').value = server.provider || 'Custom';
+        document.getElementById('wg-conf-group')?.classList.add('hidden');
+        document.getElementById('wg-validation-box')?.classList.add('hidden');
+        document.getElementById('add-server-modal')?.classList.remove('hidden');
+    } else {
+        document.getElementById('ovpn-modal-title').textContent = `Edit OpenVPN Server`;
+        document.getElementById('ovpn-edit-server-id').value = server.serverId;
+        document.getElementById('ovpn-display-name').value = server.name;
+        document.getElementById('ovpn-country').value = server.country || 'United States';
+        document.getElementById('ovpn-country-code').value = server.countryCode || 'US';
+        document.getElementById('ovpn-city').value = server.city || '';
+        document.getElementById('ovpn-provider').value = server.provider || 'Custom';
+        document.getElementById('ovpn-conf-group')?.classList.add('hidden');
+        document.getElementById('ovpn-validation-box')?.classList.add('hidden');
+
+        await populateCredentialSetsDropdown('ovpn-credential-set');
+        if (server.credentialSetId) {
+            document.getElementById('ovpn-credential-set').value = server.credentialSetId;
+        }
+        document.getElementById('add-openvpn-modal')?.classList.remove('hidden');
+    }
+}
+
+// ==========================================================================
+// INLINE CREDENTIAL SET CREATION
+// ==========================================================================
+
+function openInlineCreateCredSetModal() {
+    document.getElementById('inline-cred-name').value = '';
+    document.getElementById('inline-cred-provider').value = document.getElementById('ovpn-provider')?.value || 'VPNBook';
+    document.getElementById('inline-cred-username').value = '';
+    document.getElementById('inline-cred-password').value = '';
+    document.getElementById('inline-create-cred-set-modal')?.classList.remove('hidden');
+}
+
+function closeInlineCreateCredSetModal() {
+    document.getElementById('inline-create-cred-set-modal')?.classList.add('hidden');
+}
+
+async function handleSaveInlineCredSet(e) {
+    e.preventDefault();
+    const btn = document.getElementById('submit-inline-cred-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    const name = document.getElementById('inline-cred-name').value.trim();
+    const provider = document.getElementById('inline-cred-provider').value;
+    const username = document.getElementById('inline-cred-username').value.trim();
+    const password = document.getElementById('inline-cred-password').value;
+
+    try {
+        const res = await apiFetch('/api/v1/admin/openvpn/credential-sets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, provider, username, password })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success && data.credentialSet) {
+            closeInlineCreateCredSetModal();
+            showToast(`Credential Set "${name}" created.`, 'success');
+            await populateCredentialSetsDropdown('ovpn-credential-set');
+            document.getElementById('ovpn-credential-set').value = data.credentialSet.id;
+        } else {
+            showToast(data.error || 'Failed to save credential set.', 'danger');
+        }
+    } catch {
+        showToast('Error saving credential set.', 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save Credential Set';
+    }
+}
+
+// ==========================================================================
+// PUBLISH SUCCESS MODAL
+// ==========================================================================
+
+function showPublishSuccessModal(serverName, protocol, generation) {
+    document.getElementById('pub-success-server-name').textContent = serverName || 'Server';
+    const protoBadge = document.getElementById('pub-success-protocol');
+    if (protoBadge) {
+        protoBadge.textContent = protocol || 'OPENVPN';
+        protoBadge.className = protocol === 'WIREGUARD' ? 'badge badge-single' : 'badge badge-warning';
+    }
+    document.getElementById('pub-success-generation').textContent = `#${generation}`;
+    document.getElementById('pub-success-availability').textContent = protocol === 'OPENVPN' 
+        ? 'OpenVPN & Dual-Protocol clients' 
+        : 'WireGuard & Dual-Protocol clients';
+    document.getElementById('publish-success-modal')?.classList.remove('hidden');
+}
+
+function closePublishSuccessModal() {
+    document.getElementById('publish-success-modal')?.classList.add('hidden');
+}
+
+function viewPublishedGeneration() {
+    closePublishSuccessModal();
+    navigateTo('generations');
+}
+
+// ==========================================================================
+// PUBLISH ALL / PUBLISH SINGLE SERVER
+// ==========================================================================
+
+async function promptPublishAllChanges() {
+    if (!confirm('Publish all pending server changes?\n\nThis will atomically compile, sign, and activate a new generation catalog for all compatible clients.')) return;
+
+    try {
+        const res = await apiFetch('/api/v1/admin/servers/publish-all', { method: 'POST' });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            showToast(`Generation #${data.generation} published successfully.`, 'success');
+            loadServers();
+            loadGenerations();
+            loadDashboard();
+        } else {
+            showToast(data.error || 'Failed to publish changes.', 'danger');
+        }
+    } catch {
+        showToast('Error publishing changes.', 'danger');
+    }
+}
+
+async function publishSingleServer(serverId) {
+    const s = (currentServersList || []).find(x => x.serverId === serverId);
+    const name = s ? s.name : 'Server';
+
+    try {
+        const res = await apiFetch(`/api/v1/admin/servers/${serverId}/publish`, { method: 'POST' });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            showPublishSuccessModal(name, s?.protocol || 'OPENVPN', data.generation);
+            loadServers();
+            loadGenerations();
+            loadDashboard();
+        } else {
+            showToast(data.error || 'Failed to publish server.', 'danger');
+        }
+    } catch {
+        showToast('Error publishing server.', 'danger');
+    }
+}
+
+async function disableServer(id) {
+    try {
+        const res = await apiFetch(`/api/v1/admin/servers/${id}/disable`, { method: 'POST' });
+        if (res.ok) {
+            showToast('Server disabled.', 'success');
+            loadServers();
+            loadDashboard();
+        }
+    } catch { }
+}
+
+async function enableServer(id) {
+    try {
+        const res = await apiFetch(`/api/v1/admin/servers/${id}/enable`, { method: 'POST' });
+        if (res.ok) {
+            showToast('Server enabled.', 'success');
+            loadServers();
+            loadDashboard();
+        }
+    } catch { }
+}
+
+async function promptDeleteServer(id, name) {
+    if (confirm(`Remove server "${name}" from registry?`)) {
+        try {
+            const res = await apiFetch(`/api/v1/admin/servers/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                showToast('Server removed.', 'success');
+                loadServers();
+                loadDashboard();
+            }
+        } catch { }
+    }
+}
+
+// ==========================================================================
 // BULK OPENVPN IMPORT
-// ----------------------------------------------------
+// ==========================================================================
 
 function openBulkOpenVpnModal() {
     document.getElementById('bulk-openvpn-modal')?.classList.remove('hidden');
@@ -1073,7 +1114,10 @@ function closeBulkOpenVpnModal() {
 function handleBulkFilesSelect(e) {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
+    handleBulkFilesDrop(files);
+}
 
+function handleBulkFilesDrop(files) {
     bulkFilesToImport = files;
     document.getElementById('bulk-files-count').textContent = files.length;
     const list = document.getElementById('bulk-files-list');
@@ -1102,30 +1146,43 @@ async function handleBulkImportOpenVpn(e) {
     const provider = document.getElementById('bulk-provider').value;
     const credentialSetId = document.getElementById('bulk-cred-set').value || null;
 
-    const filesPayload = [];
-    for (const f of bulkFilesToImport) {
-        const text = await f.text();
-        filesPayload.push({
-            fileName: f.name,
-            content: text
-        });
-    }
-
     try {
+        const fileReadPromises = bulkFilesToImport.map(file => {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const fname = file.name.replace(/\.(ovpn|conf|txt)$/i, '');
+                    const parts = fname.split(/[-_\s]+/);
+                    let countryCode = 'US';
+                    if (parts.length > 0 && parts[0].length === 2) {
+                        countryCode = parts[0].toUpperCase();
+                    }
+                    resolve({
+                        displayName: fname,
+                        country: countryCode,
+                        countryCode: countryCode,
+                        region: countryCode,
+                        provider,
+                        credentialSetId,
+                        ovpnContent: event.target.result
+                    });
+                };
+                reader.readAsText(file);
+            });
+        });
+
+        const servers = await Promise.all(fileReadPromises);
+
         const res = await apiFetch('/api/v1/admin/servers/openvpn/bulk', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                provider,
-                credentialSetId,
-                files: filesPayload
-            })
+            body: JSON.stringify({ servers })
         });
 
         const data = await res.json();
-        if (res.ok) {
+        if (res.ok && data.success) {
             closeBulkOpenVpnModal();
-            showToast(`Bulk Import Complete: ${data.importedCount} added, ${data.rejectedCount} rejected.`, 'success');
+            showToast(data.message || `Imported ${data.importedCount} OpenVPN servers.`, 'success');
             loadServers();
             loadDashboard();
             switchProtocolTab('OPENVPN');
@@ -1140,9 +1197,9 @@ async function handleBulkImportOpenVpn(e) {
     }
 }
 
-// ----------------------------------------------------
-// CREDENTIAL SETS MANAGEMENT
-// ----------------------------------------------------
+// ==========================================================================
+// CREDENTIAL SETS MANAGEMENT MODAL
+// ==========================================================================
 
 async function openCredentialSetsModal() {
     document.getElementById('credential-sets-modal')?.classList.remove('hidden');
@@ -1162,13 +1219,13 @@ async function loadCredentialSets() {
     try {
         const res = await apiFetch('/api/v1/admin/openvpn/credential-sets');
         currentCredentialSetsList = await res.json();
-        renderCredentialSetsList();
+        renderCredentialSets();
     } catch {
-        container.innerHTML = '<div class="empty-state">Failed to load credential sets.</div>';
+        container.innerHTML = '<div class="empty-state">Unable to load credential sets.</div>';
     }
 }
 
-function renderCredentialSetsList() {
+function renderCredentialSets() {
     const container = document.getElementById('cred-sets-list-container');
     if (!container) return;
 
@@ -1183,18 +1240,17 @@ function renderCredentialSetsList() {
                 <div class="cred-set-card">
                     <div class="cred-set-info">
                         <div class="cred-set-title">
-                            <span>🔑</span>
-                            <span>${escapeHtml(cs.name)}</span>
-                            <span class="badge badge-accent">${escapeHtml(cs.provider)}</span>
+                            🔑 ${escapeHtml(cs.name)}
+                            <span class="badge ${cs.provider === 'Proton' ? 'badge-proton' : (cs.provider === 'VPNBook' ? 'badge-vpnbook' : 'badge-custom')}">${escapeHtml(cs.provider)}</span>
                         </div>
                         <div class="cred-set-meta">
                             <span>User: <strong>${escapeHtml(cs.username)}</strong></span>
-                            <span>Password: <code>••••••••</code></span>
-                            <span>Updated: ${formatDate(cs.updatedAtUtc)}</span>
+                            <span>Pass: ••••••••</span>
+                            <span>Linked Servers: ${cs.linkedServersCount || 0}</span>
                         </div>
                     </div>
                     <div class="row-actions">
-                        <button class="btn btn-secondary btn-sm" onclick="editCredSet('${cs.id}')">Edit / Rotate</button>
+                        <button class="btn btn-secondary btn-sm" onclick="editCredSet('${cs.id}')">Edit</button>
                         <button class="btn btn-danger btn-sm" onclick="deleteCredSet('${cs.id}', '${escapeHtml(cs.name)}')">Delete</button>
                     </div>
                 </div>
@@ -1207,7 +1263,7 @@ function openCreateCredSetForm() {
     document.getElementById('cred-set-editor-title').textContent = 'New Credential Set';
     document.getElementById('cred-set-edit-id').value = '';
     document.getElementById('cred-set-name').value = '';
-    document.getElementById('cred-set-provider').value = 'Proton';
+    document.getElementById('cred-set-provider').value = 'VPNBook';
     document.getElementById('cred-set-username').value = '';
     document.getElementById('cred-set-password').value = '';
     document.getElementById('cred-set-password').placeholder = 'Enter password';
@@ -1299,49 +1355,14 @@ async function populateCredentialSetsDropdown(selectId) {
 
     try {
         const res = await apiFetch('/api/v1/admin/openvpn/credential-sets');
-        const list = await res.json();
+        currentCredentialSetsList = await res.json();
         sel.innerHTML = '<option value="">None / Inline Certificate Only</option>' +
-            list.map(c => `<option value="${c.id}">${escapeHtml(c.name)} (${escapeHtml(c.provider)})</option>`).join('');
+            currentCredentialSetsList.map(c => `<option value="${c.id}">${escapeHtml(c.name)} (${escapeHtml(c.provider)})</option>`).join('');
     } catch { }
-}
-
-async function disableServer(id) {
-    try {
-        const res = await apiFetch(`/api/v1/admin/servers/${id}/disable`, { method: 'POST' });
-        if (res.ok) {
-            showToast('Server disabled.', 'success');
-            loadServers();
-            loadDashboard();
-        }
-    } catch { }
-}
-
-async function enableServer(id) {
-    try {
-        const res = await apiFetch(`/api/v1/admin/servers/${id}/enable`, { method: 'POST' });
-        if (res.ok) {
-            showToast('Server enabled.', 'success');
-            loadServers();
-            loadDashboard();
-        }
-    } catch { }
-}
-
-async function promptDeleteServer(id, name) {
-    if (confirm(`Remove server "${name}" from catalog registry?`)) {
-        try {
-            const res = await apiFetch(`/api/v1/admin/servers/${id}`, { method: 'DELETE' });
-            if (res.ok) {
-                showToast('Server deleted.', 'success');
-                loadServers();
-                loadDashboard();
-            }
-        } catch { }
-    }
 }
 
 // ==========================================================================
-// GENERATIONS
+// GENERATIONS (ADVANCED / HISTORY / ROLLBACK)
 // ==========================================================================
 
 async function loadGenerations() {
@@ -1369,14 +1390,14 @@ async function loadGenerations() {
                         <div>
                             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
                                 <span style="font-size: 18px; font-weight: bold; color: #F8FAFC;">Active Generation #${status.activeGeneration}</span>
-                                <span class="badge badge-active">ACTIVE</span>
+                                <span class="badge badge-active">ACTIVE &amp; SIGNED</span>
                             </div>
                             <div style="font-size: 12px; color: #94A3B8;">
                                 Published: <strong>${status.activePublishedAtUtc ? formatDate(status.activePublishedAtUtc) : 'N/A'}</strong> |
                                 Total Active Servers: <strong>${status.activeGenerationCount}</strong>
                             </div>
                         </div>
-                        <button class="btn btn-primary btn-sm" onclick="promptPublishChanges()" style="background: #10B981; border-color: #059669;">
+                        <button class="btn btn-primary btn-sm btn-publish-highlight" onclick="promptPublishAllChanges()">
                             ⚡ Publish New Generation
                         </button>
                     </div>
@@ -1386,9 +1407,9 @@ async function loadGenerations() {
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                         <div>
                             <span style="font-size: 16px; font-weight: bold; color: #F8FAFC;">No Active Generation Published</span>
-                            <div style="font-size: 12px; color: #FCD34D;">Clients currently receive zero servers. Publish a generation to make servers available.</div>
+                            <div style="font-size: 12px; color: #FCD34D;">Clients currently receive zero servers. Publish a generation to make servers live.</div>
                         </div>
-                        <button class="btn btn-primary btn-sm" onclick="promptPublishChanges()">
+                        <button class="btn btn-primary btn-sm btn-publish-highlight" onclick="promptPublishAllChanges()">
                             ⚡ Publish Initial Generation
                         </button>
                     </div>
@@ -1425,55 +1446,408 @@ async function loadGenerations() {
                             </div>
                             <div class="row-meta">
                                 <span>Published: ${formatDate(g.publishedAtUtc)}</span>
-                                <span>By: ${escapeHtml(g.publishedBy || 'System')}</span>
+                                <span>By: ${escapeHtml(g.publishedBy || 'Admin')}</span>
                             </div>
                         </div>
                         <div class="row-actions">
                             ${!g.isActive ? `
-                                <button class="btn btn-secondary btn-sm" onclick="rollbackToGeneration(${g.generation})">Activate / Rollback</button>
+                                <button class="btn btn-secondary btn-sm" onclick="rollbackToGeneration(${g.generation})">Rollback to #${g.generation}</button>
                             ` : ''}
                         </div>
                     </div>
                 `).join('')}
             </div>
         `;
-    } catch (e) {
-        container.innerHTML = '<div class="empty-state">Unable to load catalog generations.<br><button class="btn btn-secondary btn-sm mt-2" onclick="loadGenerations()">Retry</button></div>';
-    }
-}
-
-async function promptPublishChanges() {
-    if (!confirm('Publish server changes?\n\nThis will create a new signed profile generation and make it active for compatible clients.')) return;
-
-    try {
-        const res = await apiFetch('/api/v1/admin/generations', { method: 'POST' });
-        const data = await res.json();
-        if (res.ok && data.success) {
-            showToast(data.message || `Generation #${data.generation} published successfully.`, 'success');
-            loadServers();
-            loadGenerations();
-            loadDashboard();
-        } else {
-            showToast(data.error || 'Failed to publish generation.', 'danger');
-        }
     } catch {
-        showToast('Error publishing generation.', 'danger');
+        container.innerHTML = '<div class="empty-state">Unable to load catalog generations.</div>';
     }
-}
-
-async function handleCompileAndPublishGeneration() {
-    await promptPublishChanges();
 }
 
 async function rollbackToGeneration(genNumber) {
-    if (!confirm(`Switch active catalog generation to #${genNumber}?`)) return;
+    if (!confirm(`Rollback active catalog to Generation #${genNumber}?\n\nClients will immediately begin receiving profiles from Generation #${genNumber}.`)) return;
 
     try {
         const res = await apiFetch(`/api/v1/admin/generations/${genNumber}/publish`, { method: 'POST' });
         const data = await res.json();
         if (res.ok && data.success) {
-            showToast(data.message || 'Switched active generation.', 'success');
+            showToast(`Active catalog switched to Generation #${genNumber}.`, 'success');
             loadGenerations();
+            loadServers();
+            loadDashboard();
+        } else {
+            showToast(data.error || 'Rollback failed.', 'danger');
+        }
+    } catch {
+        showToast('Error executing rollback.', 'danger');
+    }
+}
+
+// ==========================================================================
+// DASHBOARD VIEW
+// ==========================================================================
+
+async function loadDashboard() {
+    try {
+        const res = await apiFetch('/api/v1/admin/dashboard');
+        const data = await res.json();
+
+        // Check publication status for warning banner
+        const statusRes = await apiFetch('/api/v1/admin/servers/publication-status');
+        const status = await statusRes.json();
+
+        const banner = document.getElementById('dashboard-unpublished-banner');
+        if (banner) {
+            banner.classList.toggle('hidden', !status.hasPendingChanges);
+        }
+
+        // Metrics
+        const genEl = document.getElementById('metric-generation');
+        if (genEl) genEl.textContent = data.currentGeneration > 0 ? `Gen #${data.currentGeneration}` : 'None';
+
+        const pubServersEl = document.getElementById('metric-published-servers');
+        if (pubServersEl) pubServersEl.textContent = status.activeGenerationCount || 0;
+
+        const wgServersEl = document.getElementById('metric-wg-servers');
+        if (wgServersEl) wgServersEl.textContent = data.wireGuardServersCount || 0;
+
+        const ovpnServersEl = document.getElementById('metric-ovpn-servers');
+        if (ovpnServersEl) ovpnServersEl.textContent = data.openVpnServersCount || 0;
+
+        const clientsEl = document.getElementById('metric-active-clients');
+        if (clientsEl) clientsEl.textContent = data.activeClientsCount || 0;
+
+        const keysEl = document.getElementById('metric-active-keys');
+        if (keysEl) keysEl.textContent = data.activeKeysCount || 0;
+
+        // Recent Activations
+        const actContainer = document.getElementById('dashboard-activations');
+        if (actContainer) {
+            if (!data.recentActivations || data.recentActivations.length === 0) {
+                actContainer.innerHTML = '<div class="empty-state">No client activations recorded yet.</div>';
+            } else {
+                actContainer.innerHTML = `
+                    <div class="item-list">
+                        ${data.recentActivations.map(c => `
+                            <div class="list-row">
+                                <div class="row-main">
+                                    <div class="row-title-line">
+                                        <span class="row-title"><code>${escapeHtml((c.clientId || '').substring(0, 16))}...</code></span>
+                                        <span class="badge ${c.isActive ? 'badge-active' : 'badge-revoked'}">${c.isActive ? 'Active' : 'Revoked'}</span>
+                                        <span class="badge badge-single">${escapeHtml(c.accessKeyName || 'Ticket')}</span>
+                                    </div>
+                                    <div class="row-meta">
+                                        <span>Enrolled: ${formatDate(c.enrolledAtUtc)}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+        }
+
+        // Recent Audit
+        const auditContainer = document.getElementById('dashboard-audit');
+        if (auditContainer) {
+            if (!data.recentAudit || data.recentAudit.length === 0) {
+                auditContainer.innerHTML = '<div class="empty-state">No security events recorded.</div>';
+            } else {
+                auditContainer.innerHTML = `
+                    <div class="item-list">
+                        ${data.recentAudit.map(a => `
+                            <div class="list-row">
+                                <div class="row-main">
+                                    <div class="row-title-line">
+                                        <span class="row-title">${escapeHtml(a.eventType)}</span>
+                                        <span class="text-muted" style="font-size: 11px;">IP: ${escapeHtml(a.ipAddress)}</span>
+                                    </div>
+                                    <div class="row-meta">
+                                        <span>Actor: ${escapeHtml(a.actor)}</span>
+                                        <span>${formatDate(a.timestampUtc)}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+        }
+    } catch { }
+}
+
+// ==========================================================================
+// ACCESS KEYS
+// ==========================================================================
+
+async function loadAccessKeys() {
+    const container = document.getElementById('access-keys-container');
+    if (!container) return;
+    container.innerHTML = '<div class="loading-state">Loading access keys...</div>';
+
+    try {
+        const res = await apiFetch('/api/v1/admin/access-keys');
+        currentKeysList = await res.json();
+        renderAccessKeys();
+    } catch {
+        container.innerHTML = '<div class="empty-state">Unable to load access keys.</div>';
+    }
+}
+
+function renderAccessKeys() {
+    const container = document.getElementById('access-keys-container');
+    if (!container) return;
+
+    if (!currentKeysList || currentKeysList.length === 0) {
+        container.innerHTML = '<div class="empty-state">No access keys found. Click "Generate Access Key" to create one.</div>';
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="item-list">
+            ${currentKeysList.map(k => `
+                <div class="list-row">
+                    <div class="row-main">
+                        <div class="row-title-line">
+                            <span class="row-title">${escapeHtml(k.name)}</span>
+                            <span class="badge ${k.status === 'Active' ? 'badge-active' : 'badge-revoked'}">${escapeHtml(k.status)}</span>
+                            <span class="badge ${k.type === 'GROUP' ? 'badge-group' : 'badge-single'}">${escapeHtml(k.type)}</span>
+                        </div>
+                        <div class="row-meta">
+                            <span>Prefix: <code>${escapeHtml(k.codePrefix)}...</code></span>
+                            <span>Uses: ${k.usesCount}${k.maxUses ? ` / ${k.maxUses}` : ' (Unlimited)'}</span>
+                            <span>Expires: ${formatDate(k.expiresAtUtc)}</span>
+                        </div>
+                    </div>
+                    <div class="row-actions">
+                        <button class="btn btn-secondary btn-sm" onclick="showKeyUsage('${k.id}')">Activations</button>
+                        ${k.status === 'Active' ? `
+                            <button class="btn btn-danger btn-sm" onclick="revokeAccessKey('${k.id}')">Revoke</button>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function openGenerateKeyModal() {
+    document.getElementById('key-name').value = '';
+    document.getElementById('key-type').value = 'SINGLE_USE';
+    document.getElementById('key-expiration').value = '30d';
+    document.getElementById('key-max-uses').value = '';
+    document.getElementById('group-key-options')?.classList.add('hidden');
+    document.getElementById('key-custom-expiration')?.classList.add('hidden');
+    document.getElementById('generate-key-modal')?.classList.remove('hidden');
+}
+
+function closeGenerateKeyModal() {
+    document.getElementById('generate-key-modal')?.classList.add('hidden');
+}
+
+function toggleKeyTypeOptions() {
+    const isGroup = document.getElementById('key-type').value === 'GROUP';
+    document.getElementById('group-key-options')?.classList.toggle('hidden', !isGroup);
+}
+
+function toggleCustomExpiration() {
+    const isCustom = document.getElementById('key-expiration').value === 'custom';
+    document.getElementById('key-custom-expiration')?.classList.toggle('hidden', !isCustom);
+}
+
+async function handleGenerateKey(e) {
+    e.preventDefault();
+    const btn = document.getElementById('submit-gen-key-btn');
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+
+    const name = document.getElementById('key-name').value.trim();
+    const type = document.getElementById('key-type').value;
+    const expiration = document.getElementById('key-expiration').value;
+    const customDate = document.getElementById('key-custom-expiration').value;
+    const maxUses = document.getElementById('key-max-uses').value;
+
+    try {
+        const res = await apiFetch('/api/v1/admin/access-keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                type,
+                expiration,
+                customExpiresAtUtc: customDate ? new Date(customDate).toISOString() : null,
+                maxUses: maxUses ? parseInt(maxUses, 10) : null
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+            closeGenerateKeyModal();
+            promptCopyKey(data.accessKey || data.plaintextCode, name);
+            loadAccessKeys();
+            loadDashboard();
+        } else {
+            showToast(data.error || 'Failed to generate key.', 'danger');
+        }
+    } catch {
+        showToast('Error generating access key.', 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generate Key';
+    }
+}
+
+function promptCopyKey(keyCode, keyName) {
+    navigator.clipboard?.writeText(keyCode).catch(() => {});
+    alert(`Access Key Generated Successfully!\n\nName: ${keyName}\nKey Code: ${keyCode}\n\n(Key copied to clipboard. Store securely - this code will not be shown again.)`);
+}
+
+async function revokeAccessKey(id) {
+    if (!confirm('Revoke this access key? New clients will not be able to activate with it.')) return;
+
+    try {
+        const res = await apiFetch(`/api/v1/admin/access-keys/${id}/revoke`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ revokeClients: false })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast('Access key revoked.', 'success');
+            loadAccessKeys();
+            loadDashboard();
+        } else {
+            showToast(data.error || 'Failed to revoke key.', 'danger');
+        }
+    } catch {
+        showToast('Error revoking access key.', 'danger');
+    }
+}
+
+async function showKeyUsage(id) {
+    try {
+        const res = await apiFetch(`/api/v1/admin/access-keys/${id}/usage`);
+        const data = await res.json();
+        const modal = document.getElementById('key-usage-modal');
+        const body = document.getElementById('key-usage-modal-body');
+        document.getElementById('key-usage-modal-title').textContent = `Activations for "${data.key?.name || 'Key'}"`;
+
+        if (!data.clients || data.clients.length === 0) {
+            body.innerHTML = '<div class="empty-state">No clients have activated using this key yet.</div>';
+        } else {
+            body.innerHTML = `
+                <div class="item-list">
+                    ${data.clients.map(c => `
+                        <div class="list-row">
+                            <div class="row-main">
+                                <div class="row-title-line">
+                                    <span class="row-title"><code>${escapeHtml(c.clientId)}</code></span>
+                                    <span class="badge ${c.isActive ? 'badge-active' : 'badge-revoked'}">${c.isActive ? 'Active' : 'Revoked'}</span>
+                                </div>
+                                <div class="row-meta">
+                                    <span>IP: ${escapeHtml(c.registeredIp || 'Unknown')}</span>
+                                    <span>Enrolled: ${formatDate(c.enrolledAtUtc)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+        modal.classList.remove('hidden');
+    } catch { }
+}
+
+function closeKeyUsageModal() {
+    document.getElementById('key-usage-modal')?.classList.add('hidden');
+}
+
+// ==========================================================================
+// CLIENTS
+// ==========================================================================
+
+async function loadClients() {
+    const container = document.getElementById('clients-container');
+    if (!container) return;
+    container.innerHTML = '<div class="loading-state">Loading enrolled clients...</div>';
+
+    try {
+        const res = await apiFetch('/api/v1/admin/clients');
+        currentClientsList = await res.json();
+        filterClients();
+    } catch {
+        container.innerHTML = '<div class="empty-state">Unable to load enrolled clients.</div>';
+    }
+}
+
+function filterClients() {
+    const container = document.getElementById('clients-container');
+    if (!container) return;
+
+    const search = (document.getElementById('client-search')?.value || '').toLowerCase().trim();
+    const status = document.getElementById('client-status-filter')?.value || '';
+
+    let filtered = (currentClientsList || []).filter(c => {
+        if (status === 'active' && !c.isActive) return false;
+        if (status === 'revoked' && c.isActive) return false;
+        if (search) {
+            const matchId = (c.clientId || '').toLowerCase().includes(search);
+            const matchIp = (c.registeredIp || '').toLowerCase().includes(search);
+            const matchKey = (c.accessKeyName || '').toLowerCase().includes(search);
+            if (!matchId && !matchIp && !matchKey) return false;
+        }
+        return true;
+    });
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="empty-state">No enrolled clients match the current filter.</div>';
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="item-list">
+            ${filtered.map(c => `
+                <div class="list-row">
+                    <div class="row-main">
+                        <div class="row-title-line">
+                            <span class="row-title"><code>${escapeHtml((c.clientId || '').substring(0, 16))}...</code></span>
+                            <span class="badge ${c.isActive ? 'badge-active' : 'badge-revoked'}">${c.isActive ? 'Active' : 'Revoked'}</span>
+                            <span class="badge badge-single">${escapeHtml(c.accessKeyName || 'Direct Ticket')}</span>
+                        </div>
+                        <div class="row-meta">
+                            <span>IP: ${escapeHtml(c.registeredIp || 'Unknown')}</span>
+                            <span>Enrolled: ${formatDate(c.enrolledAtUtc)}</span>
+                        </div>
+                    </div>
+                    <div class="row-actions">
+                        ${c.isActive ? `
+                            <button class="btn btn-danger btn-sm" onclick="revokeClient('${c.clientId}')">Revoke</button>
+                        ` : `
+                            <button class="btn btn-secondary btn-sm" onclick="restoreClient('${c.clientId}')">Restore</button>
+                        `}
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+async function revokeClient(clientId) {
+    try {
+        const res = await apiFetch(`/api/v1/admin/clients/${clientId}/revoke`, { method: 'POST' });
+        if (res.ok) {
+            showToast('Client revoked.', 'success');
+            loadClients();
+            loadDashboard();
+        }
+    } catch { }
+}
+
+async function restoreClient(clientId) {
+    try {
+        const res = await apiFetch(`/api/v1/admin/clients/${clientId}/restore`, { method: 'POST' });
+        if (res.ok) {
+            showToast('Client restored.', 'success');
+            loadClients();
             loadDashboard();
         }
     } catch { }
@@ -1490,34 +1864,34 @@ async function loadAuditLog() {
 
     try {
         const res = await apiFetch('/api/v1/admin/audit?limit=100');
-        const list = await res.json();
+        const events = await res.json();
 
-        if (!list || list.length === 0) {
-            container.innerHTML = '<div class="empty-state">No security audit events recorded yet.</div>';
+        if (!events || events.length === 0) {
+            container.innerHTML = '<div class="empty-state">No audit log entries recorded.</div>';
             return;
         }
 
         container.innerHTML = `
             <div class="item-list">
-                ${list.map(a => `
+                ${events.map(a => `
                     <div class="list-row">
                         <div class="row-main">
                             <div class="row-title-line">
-                                <span class="row-title">${escapeHtml(a.action)}</span>
-                                <span class="badge badge-single">${escapeHtml(a.actor)}</span>
-                                ${a.targetId ? `<span>Target: <code>${escapeHtml(a.targetId)}</code></span>` : ''}
+                                <span class="row-title">${escapeHtml(a.eventType)}</span>
+                                <span class="badge badge-subtle">${escapeHtml(a.actor || 'System')}</span>
                             </div>
                             <div class="row-meta">
+                                <span>IP: ${escapeHtml(a.ipAddress || 'Internal')}</span>
+                                ${a.targetId ? `<span>Target: <code>${escapeHtml(a.targetId)}</code></span>` : ''}
                                 <span>${formatDate(a.timestampUtc)}</span>
-                                <span>IP: ${escapeHtml(a.clientIp)}</span>
                             </div>
                         </div>
                     </div>
                 `).join('')}
             </div>
         `;
-    } catch (e) {
-        container.innerHTML = '<div class="empty-state">Unable to load audit log.<br><button class="btn btn-secondary btn-sm mt-2" onclick="loadAuditLog()">Retry</button></div>';
+    } catch {
+        container.innerHTML = '<div class="empty-state">Unable to load audit log.</div>';
     }
 }
 
@@ -1530,72 +1904,35 @@ async function loadSystemInfo() {
         const res = await apiFetch('/api/v1/admin/system/info');
         const data = await res.json();
 
+        const uptimeHours = (data.uptimeSeconds / 3600).toFixed(1);
+        const memMB = (data.memoryBytes / (1024 * 1024)).toFixed(1);
+
         container.innerHTML = `
             <div class="metrics-grid">
                 <div class="metric-card">
-                    <div class="metric-value text-success">Healthy</div>
+                    <div class="metric-value text-success">Online</div>
                     <div class="metric-label">Service Health</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">${(data.uptimeSeconds / 3600).toFixed(1)}h</div>
-                    <div class="metric-label">Backend Uptime</div>
+                    <div class="metric-value">${uptimeHours} hrs</div>
+                    <div class="metric-label">System Uptime</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">${(data.memoryBytes / (1024 * 1024)).toFixed(1)} MB</div>
+                    <div class="metric-value">${memMB} MB</div>
                     <div class="metric-label">Memory Usage</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">${data.processorCount} Cores</div>
+                    <div class="metric-value">${data.processorCount}</div>
                     <div class="metric-label">CPU Cores</div>
                 </div>
             </div>
-            <div class="card mt-3 p-3">
-                <div class="row-meta" style="flex-direction: column; align-items: flex-start; gap: 6px;">
-                    <div><strong>OS:</strong> ${escapeHtml(data.osVersion)} (${data.is64Bit ? '64-bit' : '32-bit'})</div>
-                    <div><strong>Runtime:</strong> .NET ${escapeHtml(data.runtime)}</div>
-                    <div><strong>Host Machine:</strong> ${escapeHtml(data.machineName)}</div>
-                </div>
+            <div class="card mt-3 p-3" style="font-size: 13px; color: #94A3B8;">
+                <p><strong>OS:</strong> ${escapeHtml(data.osVersion)}</p>
+                <p class="mt-1"><strong>Runtime:</strong> .NET ${escapeHtml(data.runtime)} (${data.is64Bit ? '64-bit' : '32-bit'})</p>
+                <p class="mt-1"><strong>Machine Name:</strong> ${escapeHtml(data.machineName)}</p>
             </div>
         `;
-    } catch (e) {
-        container.innerHTML = '<div class="empty-state">Unable to load system info.<br><button class="btn btn-secondary btn-sm mt-2" onclick="loadSystemInfo()">Retry</button></div>';
+    } catch {
+        container.innerHTML = '<div class="empty-state">Unable to load system info.</div>';
     }
-}
-
-// ----------------------------------------------------
-// DRAG & DROP SETUP
-// ----------------------------------------------------
-
-function setupDragAndDrop() {
-    ['ovpn-dropzone', 'bulk-dropzone'].forEach(id => {
-        const dropzone = document.getElementById(id);
-        if (!dropzone) return;
-
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            dropzone.addEventListener(eventName, (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-            }, false);
-        });
-
-        ['dragenter', 'dragover'].forEach(eventName => {
-            dropzone.addEventListener(eventName, () => dropzone.classList.add('dragover'), false);
-        });
-
-        ['dragleave', 'drop'].forEach(eventName => {
-            dropzone.addEventListener(eventName, () => dropzone.classList.remove('dragover'), false);
-        });
-
-        dropzone.addEventListener('drop', (e) => {
-            const dt = e.dataTransfer;
-            const files = dt.files;
-            if (id === 'ovpn-dropzone' && files.length > 0) {
-                const fakeEvent = { target: { files: [files[0]] } };
-                handleOvpnFileSelect(fakeEvent);
-            } else if (id === 'bulk-dropzone' && files.length > 0) {
-                const fakeEvent = { target: { files: files } };
-                handleBulkFilesSelect(fakeEvent);
-            }
-        }, false);
-    });
 }
