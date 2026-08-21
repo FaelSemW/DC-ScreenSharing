@@ -237,4 +237,27 @@ public static class WinDivertNative
 
         return udpLen >= 8 && length >= ipHeaderLen + 8;
     }
+
+    public static void ModifyIPv4TcpDestination(
+        byte[] packet,
+        int length,
+        int ipHeaderLen,
+        IPAddress newDstIp,
+        ushort newDstPort,
+        ref WINDIVERT_ADDRESS addr)
+    {
+        byte[] newIpBytes = newDstIp.GetAddressBytes();
+        Array.Copy(newIpBytes, 0, packet, 16, 4);
+
+        packet[ipHeaderLen + 2] = (byte)(newDstPort >> 8);
+        packet[ipHeaderLen + 3] = (byte)(newDstPort & 0xFF);
+
+        addr.IPChecksum = 1;
+        addr.TCPChecksum = 1;
+        try
+        {
+            WinDivertHelperCalcChecksums(packet, (uint)length, ref addr, 0);
+        }
+        catch (DllNotFoundException) { }
+    }
 }

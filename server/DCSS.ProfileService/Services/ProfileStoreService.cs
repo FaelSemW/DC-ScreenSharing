@@ -1106,6 +1106,7 @@ public class ProfileStoreService
     private void SaveGenerationInternal(SignedManifest manifest, string publishedBy)
     {
         var genDir = Path.Combine(_storageDirectory, "generations");
+        Directory.CreateDirectory(genDir);
         var manifestPath = Path.Combine(genDir, $"manifest_gen_{manifest.Generation}.json");
         var tempPath = Path.Combine(genDir, $"manifest_gen_{manifest.Generation}.tmp");
 

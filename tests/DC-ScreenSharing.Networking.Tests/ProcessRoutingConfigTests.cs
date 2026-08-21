@@ -11,7 +11,7 @@ namespace DCScreenSharing.Networking.Tests;
 public class ProcessRoutingConfigTests
 {
     [Fact]
-    public void GenerateEngineConfig_ProducesValidJson_WithDiscordProcessRules()
+    public void GenerateEngineConfig_ProducesValidJson_WithLocalProxyInbound()
     {
         var logger = new FileLogger(Path.GetTempPath());
         var engine = new ProcessRoutingEngine(logger);
@@ -29,11 +29,10 @@ public class ProcessRoutingConfigTests
         var json = engine.GenerateEngineConfig(config);
 
         Assert.NotNull(json);
-        Assert.Contains("Discord.exe", json);
+        Assert.Contains("proxy-in", json);
         Assert.Contains("wg-out", json);
         Assert.Contains("198.51.100.1", json);
         Assert.Contains("direct", json);
-        Assert.Contains("default_domain_resolver", json);
     }
 
     [Fact]
@@ -91,11 +90,6 @@ PersistentKeepalive = 25
             Assert.Contains("0.0.0.0/0", allowedIps);
             Assert.Contains("::/0", allowedIps);
 
-            // Check DNS servers contain multiple remote servers
-            var dnsServers = root.GetProperty("dns").GetProperty("servers").EnumerateArray().ToList();
-            Assert.Contains(dnsServers, s => s.GetProperty("server").GetString() == "10.2.0.1");
-            Assert.Contains(dnsServers, s => s.GetProperty("server").GetString() == "2a07:b944::2:1");
-
             // Validate against bundled sing-box binary (exit code 0)
             var (isValid, error) = engine.ValidateRuntimeConfiguration(config);
             Assert.True(isValid, $"sing-box validation failed: {error}");
@@ -108,7 +102,7 @@ PersistentKeepalive = 25
     }
 
     [Fact]
-    public void SplitTunnelingMatrix_GuaranteesDiscordEntersTunnel_AndBrowsersUseDirect()
+    public void TargetProxyArchitecture_UsesLoopbackProxyWithoutTun_AndProtectsHostTraffic()
     {
         var logger = new FileLogger(Path.GetTempPath());
         var engine = new ProcessRoutingEngine(logger);
@@ -127,10 +121,11 @@ PersistentKeepalive = 25
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
-        // 1. Verify TUN Inbound
+        // 1. Verify Loopback Mixed (SOCKS5/HTTP) Inbound — Zero TUN, Zero Host Route modifications
         var inbounds = root.GetProperty("inbounds");
-        Assert.Equal("tun", inbounds[0].GetProperty("type").GetString());
-        Assert.Equal("dcss-wintun", inbounds[0].GetProperty("interface_name").GetString());
+        Assert.Equal("mixed", inbounds[0].GetProperty("type").GetString());
+        Assert.Equal("127.0.0.1", inbounds[0].GetProperty("listen").GetString());
+        Assert.Equal(15888, inbounds[0].GetProperty("listen_port").GetInt32());
 
         // 2. Verify Endpoints & Outbounds
         var endpoints = root.GetProperty("endpoints");
@@ -141,35 +136,14 @@ PersistentKeepalive = 25
         Assert.Equal("direct", outbounds[0].GetProperty("type").GetString());
         Assert.Equal("direct", outbounds[0].GetProperty("tag").GetString());
 
-        // 3. Verify Process-Level Route Rules
+        // 3. Verify Route Rules: proxy-in routes to wg-out
         var route = root.GetProperty("route");
         Assert.Equal("direct", route.GetProperty("final").GetString());
-        Assert.Equal("dns-direct", route.GetProperty("default_domain_resolver").GetString());
 
         var rules = route.GetProperty("rules").EnumerateArray().ToList();
-        
-        // Find discord routing rule
-        var discordRule = rules.FirstOrDefault(r => r.TryGetProperty("process_name", out _));
-        Assert.True(discordRule.ValueKind != JsonValueKind.Undefined, "Could not find process_name routing rule");
-
-        var matchedProcs = discordRule.GetProperty("process_name").EnumerateArray().Select(p => p.GetString()).ToList();
-        Assert.Contains("Discord.exe", matchedProcs);
-        Assert.Contains("DiscordCanary.exe", matchedProcs);
-        Assert.Contains("DiscordPTB.exe", matchedProcs);
-
-        // Explicitly assert that browsers are NOT in the tunnel match list
-        Assert.DoesNotContain("chrome.exe", matchedProcs);
-        Assert.DoesNotContain("msedge.exe", matchedProcs);
-        Assert.DoesNotContain("firefox.exe", matchedProcs);
-
-        // Final / fallback rule routes direct
-        var finalDirectRule = rules.Last();
-        Assert.Equal("direct", finalDirectRule.GetProperty("outbound").GetString());
-
-        // 4. Verify DNS Split
-        var dnsRules = root.GetProperty("dns").GetProperty("rules");
-        var dnsRule = dnsRules[0];
-        Assert.Equal("dns-remote", dnsRule.GetProperty("server").GetString());
+        var proxyRule = rules.FirstOrDefault(r => r.TryGetProperty("inbound", out _));
+        Assert.True(proxyRule.ValueKind != JsonValueKind.Undefined, "Could not find proxy-in routing rule");
+        Assert.Equal("wg-out", proxyRule.GetProperty("outbound").GetString());
     }
 
     [Fact]

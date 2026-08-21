@@ -149,6 +149,15 @@ public class ProcessIdentityResolver
 
                 return true;
             }
+            catch (ArgumentException)
+            {
+                if ((DateTime.UtcNow - targetInfo.StartTimeUtc).TotalSeconds < 10)
+                {
+                    return true;
+                }
+                _knownTargetPids.TryRemove(pid, out _);
+                return false;
+            }
             catch
             {
                 _knownTargetPids.TryRemove(pid, out _);
@@ -195,6 +204,17 @@ public class ProcessIdentityResolver
             ExecutablePath = exePath,
             ProcessName = procName,
             StartTimeUtc = startTimeUtc
+        };
+    }
+
+    public void RegisterPid(int pid, string procName = "", string exePath = "")
+    {
+        _knownTargetPids[pid] = new TargetProcessInfo
+        {
+            ProcessId = pid,
+            ExecutablePath = exePath,
+            ProcessName = string.IsNullOrEmpty(procName) ? $"PID_{pid}" : procName,
+            StartTimeUtc = DateTime.UtcNow
         };
     }
 

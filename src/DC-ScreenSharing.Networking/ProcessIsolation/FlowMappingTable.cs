@@ -46,6 +46,8 @@ public class FlowMappingTable
 
     public int Count => _flows.Count;
 
+    public IReadOnlyCollection<FlowEntry> GetAllFlows() => _flows.Values.ToList();
+
     public bool TryGetFlow(FlowKey key, out FlowEntry? entry)
     {
         return _flows.TryGetValue(key, out entry);

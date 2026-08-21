@@ -5,6 +5,7 @@ using DCScreenSharing.Core.Profiles;
 using DCSS.ProfileService.Controllers;
 using DCSS.ProfileService.Services;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace DC_ScreenSharing.IntegrationTests;
@@ -23,7 +24,18 @@ public class AdminWebsiteTests : IClassFixture<WebApplicationFactory<global::Pro
         Environment.SetEnvironmentVariable("ProfileService__StoragePath", _testStorageDir);
         Environment.SetEnvironmentVariable("ADMIN_API_KEY", TestAdminApiKey);
 
-        _factory = factory.WithWebHostBuilder(builder => { });
+        _factory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((ctx, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["ADMIN_API_KEY"] = TestAdminApiKey,
+                    ["Admin:ApiKey"] = TestAdminApiKey,
+                    ["ProfileService:StoragePath"] = _testStorageDir
+                });
+            });
+        });
         _client = _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             HandleCookies = true,

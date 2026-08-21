@@ -22,7 +22,21 @@ public class WinDivertProcessIsolationEngine : IProcessIsolationEngine
     private bool _isRunning;
     private readonly object _stateLock = new();
 
+    // Diagnostic flow counters
+    private long _targetTcpDetected;
+    private long _targetTcpProxied;
+    private long _targetTcpBypassed;
+    private long _targetUdpDetected;
+    private long _targetUdpProxied;
+    private long _targetUdpBypassed;
+
     public bool IsRunning => _isRunning;
+    public long TargetTcpDetected => Interlocked.Read(ref _targetTcpDetected);
+    public long TargetTcpProxied => Interlocked.Read(ref _targetTcpProxied);
+    public long TargetTcpBypassed => Interlocked.Read(ref _targetTcpBypassed);
+    public long TargetUdpDetected => Interlocked.Read(ref _targetUdpDetected);
+    public long TargetUdpProxied => Interlocked.Read(ref _targetUdpProxied);
+    public long TargetUdpBypassed => Interlocked.Read(ref _targetUdpBypassed);
 
     public WinDivertProcessIsolationEngine()
     {
@@ -62,7 +76,6 @@ public class WinDivertProcessIsolationEngine : IProcessIsolationEngine
                 if (_divertHandle == IntPtr.Zero || _divertHandle == new IntPtr(-1))
                 {
                     int err = Marshal.GetLastWin32Error();
-                    // Fallback to simulation/mock mode for testing environments without WinDivert driver loaded
                     Debug.WriteLine($"[WinDivertEngine] WinDivertOpen returned error {err}. Running in user-space fallback mode.");
                 }
                 else
@@ -201,7 +214,7 @@ public class WinDivertProcessIsolationEngine : IProcessIsolationEngine
             // Process packet
             bool handled = ProcessOutboundPacket(packetBuffer, (int)recvLen, ref addr);
 
-            // If not intercepted by routing engine, re-inject immediately (untouched normal traffic)
+            // If not intercepted by routing engine, re-inject immediately (untouched normal non-target traffic)
             if (!handled)
             {
                 WinDivertNative.WinDivertSend(_divertHandle, packetBuffer, recvLen, out _, ref addr);
@@ -216,10 +229,10 @@ public class WinDivertProcessIsolationEngine : IProcessIsolationEngine
             return false;
         }
 
-        // Avoid capturing VPN tunnel server traffic itself
+        // Avoid capturing VPN tunnel server traffic itself (e.g. WireGuard / OpenVPN outer UDP/TCP packets)
         if (_options?.VpnServerIp != null && dstIp.Equals(_options.VpnServerIp))
         {
-            return false; // Let control channel flow direct
+            return false; // Let outer VPN transport packet flow direct
         }
 
         if (proto == 17) // UDP
@@ -234,19 +247,24 @@ public class WinDivertProcessIsolationEngine : IProcessIsolationEngine
                     if (!flow.IsTargetFlow) return false;
 
                     flow.Touch(bytesSent: udpLen);
+                    Interlocked.Increment(ref _targetUdpProxied);
+
                     int payloadOffset = ipHdrLen + 8;
                     int payloadLen = udpLen - 8;
 
                     _ = _udpRouter.RouteOutboundUdpPacketAsync(
                         packet, payloadOffset, payloadLen, srcIp, srcPort, dstIp, dstPort, flowKey);
 
-                    return true; // Intercepted & routed over VPN
+                    return true; // Intercepted & routed over VPN (Fail-Closed: never touches physical)
                 }
 
                 // Resolve owning PID for socket
                 int? pid = _identityResolver.FindPidForUdpSocket(srcIp, srcPort);
                 if (pid.HasValue && _identityResolver.IsTargetProcess(pid.Value))
                 {
+                    Interlocked.Increment(ref _targetUdpDetected);
+                    Interlocked.Increment(ref _targetUdpProxied);
+
                     var newFlow = new FlowEntry
                     {
                         Key = flowKey,
@@ -261,12 +279,13 @@ public class WinDivertProcessIsolationEngine : IProcessIsolationEngine
                     _ = _udpRouter.RouteOutboundUdpPacketAsync(
                         packet, payloadOffset, payloadLen, srcIp, srcPort, dstIp, dstPort, flowKey);
 
-                    return true;
+                    return true; // Intercepted
                 }
                 else if (pid.HasValue)
                 {
                     // Non-target flow: remember so we don't re-query PID table for subsequent packets
                     _flowTable.AddOrUpdate(flowKey, new FlowEntry { Key = flowKey, Pid = pid.Value, IsTargetFlow = false });
+                    return false; // Direct physical
                 }
             }
         }
@@ -279,19 +298,35 @@ public class WinDivertProcessIsolationEngine : IProcessIsolationEngine
                 if (_flowTable.TryGetFlow(flowKey, out var flow) && flow != null)
                 {
                     if (!flow.IsTargetFlow) return false;
+
                     flow.Touch(bytesSent: length - (ipHdrLen + tcpHdrLen));
-                    return false; // TCP connections are bound at socket layer or pass-through
+                    Interlocked.Increment(ref _targetTcpProxied);
+
+                    _tcpRouter.RegisterTargetMapping(srcPort, dstIp, dstPort);
+                    WinDivertNative.ModifyIPv4TcpDestination(packet, length, ipHdrLen, IPAddress.Loopback, (ushort)_tcpRouter.ListenPort, ref addr);
+                    addr.Outbound = 0;
+                    WinDivertNative.WinDivertSend(_divertHandle, packet, (uint)length, out _, ref addr);
+                    return true; // Handled! (Diverted to local TCP proxy)
                 }
 
                 int? pid = _identityResolver.FindPidForTcpSocket(srcIp, srcPort, dstIp, dstPort);
                 if (pid.HasValue && _identityResolver.IsTargetProcess(pid.Value))
                 {
+                    Interlocked.Increment(ref _targetTcpDetected);
+                    Interlocked.Increment(ref _targetTcpProxied);
+
                     _flowTable.AddOrUpdate(flowKey, new FlowEntry
                     {
                         Key = flowKey,
                         Pid = pid.Value,
                         IsTargetFlow = true
                     });
+
+                    _tcpRouter.RegisterTargetMapping(srcPort, dstIp, dstPort);
+                    WinDivertNative.ModifyIPv4TcpDestination(packet, length, ipHdrLen, IPAddress.Loopback, (ushort)_tcpRouter.ListenPort, ref addr);
+                    addr.Outbound = 0;
+                    WinDivertNative.WinDivertSend(_divertHandle, packet, (uint)length, out _, ref addr);
+                    return true; // Handled!
                 }
                 else if (pid.HasValue)
                 {
@@ -301,6 +336,7 @@ public class WinDivertProcessIsolationEngine : IProcessIsolationEngine
                         Pid = pid.Value,
                         IsTargetFlow = false
                     });
+                    return false; // Direct physical
                 }
             }
         }
@@ -326,27 +362,30 @@ public class WinDivertProcessIsolationEngine : IProcessIsolationEngine
                 continue;
             }
 
-            if (addr.Event == (byte)WinDivertNative.WINDIVERT_EVENT.WINDIVERT_EVENT_SOCKET_CONNECT ||
-                addr.Event == (byte)WinDivertNative.WINDIVERT_EVENT.WINDIVERT_EVENT_SOCKET_BIND)
+            if (addr.Layer == (byte)WinDivertNative.WINDIVERT_LAYER.WINDIVERT_LAYER_SOCKET)
             {
                 uint pid = addr.Data.Socket.ProcessId;
-                if (pid > 4 && _identityResolver.IsTargetProcess((int)pid))
-                {
-                    var localIp = new IPAddress(BitConverter.GetBytes(addr.Data.Socket.LocalAddr0));
-                    var remoteIp = new IPAddress(BitConverter.GetBytes(addr.Data.Socket.RemoteAddr0));
-                    var flowKey = FlowKey.FromEndpoints(
-                        addr.Data.Socket.Protocol,
-                        localIp,
-                        addr.Data.Socket.LocalPort,
-                        remoteIp,
-                        addr.Data.Socket.RemotePort);
+                ushort localPort = addr.Data.Socket.LocalPort;
+                ushort remotePort = addr.Data.Socket.RemotePort;
+                byte proto = addr.Data.Socket.Protocol;
 
-                    _flowTable.AddOrUpdate(flowKey, new FlowEntry
+                if (pid > 0 && localPort > 0 && _identityResolver.IsTargetProcess((int)pid))
+                {
+                    _identityResolver.RegisterPid((int)pid, $"TargetProc_{pid}", $"TargetProc_{pid}.exe");
+
+                    if (remotePort > 0)
                     {
-                        Key = flowKey,
-                        Pid = (int)pid,
-                        IsTargetFlow = true
-                    });
+                        var localIp = new IPAddress(BitConverter.GetBytes(addr.Data.Socket.LocalAddr0));
+                        var remoteIp = new IPAddress(BitConverter.GetBytes(addr.Data.Socket.RemoteAddr0));
+                        var key = FlowKey.FromEndpoints(proto, localIp, localPort, remoteIp, remotePort);
+
+                        _flowTable.AddOrUpdate(key, new FlowEntry
+                        {
+                            Key = key,
+                            Pid = (int)pid,
+                            IsTargetFlow = true
+                        });
+                    }
                 }
             }
         }

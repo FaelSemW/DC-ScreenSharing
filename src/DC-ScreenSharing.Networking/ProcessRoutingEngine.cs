@@ -199,28 +199,65 @@ public class ProcessRoutingEngine : IAsyncDisposable
             return (false, "OpenVpnExitedEarly", $"OpenVPN terminated with exit code {exitCode}.");
         }
 
-        // 6. Discover VPN adapter index and start WinDivert process isolation
+        // 6. Discover VPN adapter name and start sing-box TUN process routing
         var vpnAdapter = InterfaceBindingService.FindVpnAdapter("OpenVPN");
-        int ifIdx = vpnAdapter?.InterfaceIndex ?? 0;
-        IPAddress? ifIp = vpnAdapter?.IpAddress;
+        string adapterName = vpnAdapter?.Name ?? "OpenVPN";
+        _logger.Info($"[OpenVPN] OpenVPN tunnel active on adapter '{adapterName}'. Starting process routing engine...");
 
-        IPAddress? serverIp = null;
-        if (IPAddress.TryParse(config.Endpoint, out var parsedIp))
+        var engineExe = FindEngineExecutable();
+        if (!string.IsNullOrEmpty(engineExe) && File.Exists(engineExe))
         {
-            serverIp = parsedIp;
+            EnsureWintunDll(Path.GetDirectoryName(engineExe) ?? _workingDirectory);
+            var configJson = GenerateEngineConfig(config, openVpnAdapterName: adapterName);
+            var configPath = Path.Combine(_workingDirectory, "engine_config.json");
+            File.WriteAllText(configPath, configJson);
+
+            var enginePsi = new ProcessStartInfo
+            {
+                FileName = engineExe,
+                Arguments = $"run -c \"{configPath}\"",
+                WorkingDirectory = _workingDirectory,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+
+            _engineProcess = new Process { StartInfo = enginePsi, EnableRaisingEvents = true };
+            _engineProcess.OutputDataReceived += (s, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                {
+                    _logger.Debug($"[Engine Stdout] {Sanitizer.Sanitize(e.Data)}");
+                }
+            };
+            _engineProcess.ErrorDataReceived += (s, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                {
+                    _logger.Warning($"[Engine Stderr] {Sanitizer.Sanitize(e.Data)}");
+                }
+            };
+
+            if (!_engineProcess.Start())
+            {
+                _logger.Warning("[OpenVPN] Failed to start secondary process routing engine; falling back to direct OpenVPN adapter.");
+            }
+            else
+            {
+                _engineProcess.BeginOutputReadLine();
+                _engineProcess.BeginErrorReadLine();
+            }
         }
 
+        // Start WinDivert process isolation pointing target traffic to local proxy transport
         _isolationEngine.StartAsync(new ProcessIsolationOptions
         {
             TargetProcessNames = config.AllowedApps ?? new List<string> { "Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe" },
-            VpnInterfaceIndex = ifIdx,
-            VpnInterfaceIp = ifIp,
-            VpnServerIp = serverIp,
-            VpnServerPort = (ushort)config.Port,
             TransportType = "OpenVPN"
         }).GetAwaiter().GetResult();
 
-        _logger.Info($"[OpenVPN] Process isolation active on interface #{ifIdx} (IP: {ifIp}). OpenVPN tunnel ready.");
+        _logger.Info($"[OpenVPN] OpenVPN tunnel and WinDivert process isolation active.");
         return (true, null, "OpenVPN tunnel active.");
     }
 
@@ -349,14 +386,14 @@ public class ProcessRoutingEngine : IAsyncDisposable
             return (false, "EngineExitedEarly", $"Routing engine terminated unexpectedly (exit code {exitCode}).");
         }
 
-        // Start WinDivert process isolation
+        // Start WinDivert process isolation pointing target traffic to local proxy transport
         _isolationEngine.StartAsync(new ProcessIsolationOptions
         {
             TargetProcessNames = config.AllowedApps ?? new List<string> { "Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe" },
             TransportType = "WireGuard"
         }).GetAwaiter().GetResult();
 
-        _logger.Info("[WireGuard] WireGuard tunnel and process isolation active.");
+        _logger.Info("[WireGuard] WireGuard local proxy transport and WinDivert process isolation active.");
         return (true, null, "WireGuard tunnel active.");
     }
 
@@ -520,7 +557,45 @@ public class ProcessRoutingEngine : IAsyncDisposable
         return candidates.FirstOrDefault(File.Exists) ?? string.Empty;
     }
 
-    public string GenerateEngineConfig(TunnelConfiguration config)
+    private string? EnsureWintunDll(string engineDir)
+    {
+        try
+        {
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            var wintunSources = new[]
+            {
+                Path.Combine(baseDir, "native", "wintun.dll"),
+                Path.Combine(baseDir, "wintun.dll"),
+                Path.Combine(engineDir, "wintun.dll"),
+                Path.Combine(Directory.GetCurrentDirectory(), "runtimes", "win-x64", "native", "wintun.dll"),
+                @"C:\Program Files\DC-ScreenSharing\native\wintun.dll",
+                @"D:\DC-ScreenSharing\runtimes\win-x64\native\wintun.dll"
+            };
+
+            var source = wintunSources.FirstOrDefault(File.Exists);
+            if (source != null)
+            {
+                var destInWorking = Path.Combine(_workingDirectory, "wintun.dll");
+                if (!File.Exists(destInWorking))
+                {
+                    File.Copy(source, destInWorking, overwrite: true);
+                }
+
+                var destInEngineDir = Path.Combine(engineDir, "wintun.dll");
+                if (!File.Exists(destInEngineDir))
+                {
+                    try { File.Copy(source, destInEngineDir, overwrite: true); } catch { }
+                }
+
+                return source;
+            }
+        }
+        catch { }
+
+        return null;
+    }
+
+    public string GenerateEngineConfig(TunnelConfiguration config, string? openVpnAdapterName = null)
     {
         var processList = new List<string>(config.AllowedApps ?? new List<string>());
         var standardDiscordExes = new[] { "Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe", "DiscordDevelopment.exe" };
@@ -531,6 +606,9 @@ public class ProcessRoutingEngine : IAsyncDisposable
                 processList.Add(name);
             }
         }
+
+        var isOvpn = string.Equals(config.Protocol, VpnProtocol.OpenVpn, StringComparison.OrdinalIgnoreCase);
+        string targetOutboundTag = isOvpn ? "ovpn-out" : "wg-out";
 
         var addresses = new List<string>();
         if (config.Addresses != null && config.Addresses.Count > 0)
@@ -556,51 +634,36 @@ public class ProcessRoutingEngine : IAsyncDisposable
 
         var keepaliveInterval = config.PersistentKeepalive > 0 ? config.PersistentKeepalive : 25;
 
-        var dnsList = new List<string>();
-        if (config.DnsServers != null && config.DnsServers.Count > 0)
+        // Loopback Mixed (SOCKS5/HTTP) Inbound — Zero TUN, Zero Host Route modifications
+        var inbounds = new object[]
         {
-            dnsList.AddRange(config.DnsServers.Where(d => !string.IsNullOrWhiteSpace(d)).Select(d => d.Trim()));
-        }
-        else if (!string.IsNullOrWhiteSpace(config.Dns))
-        {
-            dnsList.AddRange(config.Dns.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries).Select(d => d.Trim()));
-        }
-        if (dnsList.Count == 0)
-        {
-            dnsList.Add("1.1.1.1");
-        }
-
-        var dnsServers = new List<object>();
-        for (int i = 0; i < dnsList.Count; i++)
-        {
-            var tag = i == 0 ? "dns-remote" : $"dns-remote-{i + 1}";
-            dnsServers.Add(new { tag = tag, type = "udp", server = dnsList[i], server_port = 53, detour = "wg-out" });
-        }
-        dnsServers.Add(new { tag = "dns-direct", type = "local", detour = "direct" });
-
-        var configObj = new
-        {
-            log = new { level = "warn", timestamp = true },
-            dns = new
+            new
             {
-                servers = dnsServers.ToArray(),
-                rules = new object[] { new { process_name = processList, server = "dns-remote" } },
-                final = "dns-direct",
-                strategy = "prefer_ipv4"
-            },
-            inbounds = new object[]
+                type = "mixed",
+                tag = "proxy-in",
+                listen = "127.0.0.1",
+                listen_port = 15888
+            }
+        };
+
+        var outbounds = new List<object>
+        {
+            new { type = "direct", tag = "direct" }
+        };
+
+        object[]? endpoints = null;
+
+        if (isOvpn)
+        {
+            outbounds.Add(new
             {
-                new
-                {
-                    type = "tun",
-                    tag = "tun-in",
-                    interface_name = Constants.DefaultInterfaceName,
-                    address = new[] { "172.19.0.1/30", "fdfe:dc::1/126" },
-                    auto_route = false,
-                    strict_route = false,
-                    stack = "gvisor"
-                }
-            },
+                type = "direct",
+                tag = "ovpn-out",
+                bind_interface = openVpnAdapterName ?? "OpenVPN"
+            });
+        }
+        else
+        {
             endpoints = new object[]
             {
                 new
@@ -622,23 +685,30 @@ public class ProcessRoutingEngine : IAsyncDisposable
                     },
                     mtu = config.Mtu > 0 ? config.Mtu : 1420
                 }
-            },
-            outbounds = new object[] { new { type = "direct", tag = "direct" } },
+            };
+        }
+
+        var configObj = new
+        {
+            log = new { level = "warn", timestamp = true },
+            inbounds = inbounds,
+            endpoints = endpoints,
+            outbounds = outbounds.ToArray(),
             route = new
             {
-                auto_detect_interface = true,
-                default_domain_resolver = "dns-direct",
                 rules = new object[]
                 {
-                    new { domain_suffix = new[] { "zaprecovery.online", "github.com", "githubusercontent.com" }, outbound = "direct" },
-                    new { process_name = processList, outbound = "wg-out" },
-                    new { outbound = "direct" }
+                    new { inbound = new[] { "proxy-in" }, outbound = targetOutboundTag }
                 },
                 final = "direct"
             }
         };
 
-        return JsonSerializer.Serialize(configObj, new JsonSerializerOptions { WriteIndented = true });
+        return JsonSerializer.Serialize(configObj, new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+        });
     }
 
     public async ValueTask DisposeAsync()

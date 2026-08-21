@@ -102,18 +102,18 @@ public class TunnelHealthMonitorTests
         Assert.True(firstPeer.TryGetProperty("persistent_keepalive_interval", out var keepaliveProp));
         Assert.Equal(25, keepaliveProp.GetInt32());
 
-        // Verify routing rules: direct domain bypass, discord process routing, final direct
+        // Verify routing rules: proxy-in routes to wg-out, final direct
         var route = root.GetProperty("route");
         Assert.Equal("direct", route.GetProperty("final").GetString());
-        Assert.True(route.GetProperty("auto_detect_interface").GetBoolean());
 
         var inbounds = root.GetProperty("inbounds");
-        var tunIn = inbounds[0];
-        Assert.False(tunIn.GetProperty("strict_route").GetBoolean());
+        var proxyIn = inbounds[0];
+        Assert.Equal("mixed", proxyIn.GetProperty("type").GetString());
+        Assert.Equal("127.0.0.1", proxyIn.GetProperty("listen").GetString());
     }
 
     [Fact]
-    public void ProcessRoutingEngine_RoutesDiscordToWireGuard_AndOthersDirect()
+    public void ProcessRoutingEngine_RoutesLocalProxyToWireGuard_AndOthersDirect()
     {
         var logger = new TestLogger();
         var engine = new ProcessRoutingEngine(logger);
@@ -136,20 +136,20 @@ public class TunnelHealthMonitorTests
         var route = doc.RootElement.GetProperty("route");
         var rules = route.GetProperty("rules");
 
-        // Verify Discord process rule routes to wg-out
-        var foundDiscordRule = false;
+        // Verify proxy-in rule routes to wg-out
+        var foundProxyRule = false;
         foreach (var rule in rules.EnumerateArray())
         {
-            if (rule.TryGetProperty("process_name", out var pNameList) && rule.TryGetProperty("outbound", out var outBound))
+            if (rule.TryGetProperty("inbound", out var inList) && rule.TryGetProperty("outbound", out var outBound))
             {
                 if (outBound.GetString() == "wg-out")
                 {
-                    foundDiscordRule = true;
-                    Assert.Contains("Discord.exe", pNameList.EnumerateArray().Select(x => x.GetString()));
+                    foundProxyRule = true;
+                    Assert.Contains("proxy-in", inList.EnumerateArray().Select(x => x.GetString()));
                 }
             }
         }
-        Assert.True(foundDiscordRule, "Discord process routing rule to wg-out must exist in config.");
+        Assert.True(foundProxyRule, "Proxy-in routing rule to wg-out must exist in config.");
     }
 
     [Fact]

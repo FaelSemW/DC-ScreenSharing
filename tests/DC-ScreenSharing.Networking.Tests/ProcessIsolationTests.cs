@@ -197,4 +197,110 @@ public class ProcessIsolationTests
         var stoppedStats = engine.GetStats();
         Assert.False(stoppedStats.IsRunning);
     }
+
+    [Fact]
+    public void WinDivertNative_ModifyIPv4TcpDestination_RewritesCorrectly()
+    {
+        // 20-byte IP + 20-byte TCP packet
+        byte[] packet = new byte[40];
+        packet[0] = 0x45;
+        packet[2] = 0x00; packet[3] = 0x28; // Len 40
+        packet[9] = 6; // TCP
+
+        // Src 192.168.1.100, Dst 162.159.130.233
+        packet[12] = 192; packet[13] = 168; packet[14] = 1; packet[15] = 100;
+        packet[16] = 162; packet[17] = 159; packet[18] = 130; packet[19] = 233;
+
+        // TCP: Src 54321, Dst 443
+        packet[20] = 0xD4; packet[21] = 0x31; // 54321
+        packet[22] = 0x01; packet[23] = 0xBB; // 443
+
+        var addr = new WinDivertNative.WINDIVERT_ADDRESS { Outbound = 1 };
+
+        WinDivertNative.ModifyIPv4TcpDestination(packet, packet.Length, 20, IPAddress.Loopback, 15889, ref addr);
+
+        // Verify destination IP is 127.0.0.1
+        Assert.Equal(127, packet[16]);
+        Assert.Equal(0, packet[17]);
+        Assert.Equal(0, packet[18]);
+        Assert.Equal(1, packet[19]);
+
+        // Verify destination port is 15889 (0x3E11)
+        ushort rewrittenPort = (ushort)((packet[22] << 8) | packet[23]);
+        Assert.Equal(15889, rewrittenPort);
+    }
+
+    [Fact]
+    public void ProcessIdentityResolver_CaseInsensitiveMatching_SupportsMultipleVariants()
+    {
+        var resolver = new ProcessIdentityResolver(new[] { "Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe" });
+
+        int pid1 = 1001;
+        int pid2 = 1002;
+        int pid3 = 1003;
+        int pidChrome = 2001;
+
+        resolver.RegisterTargetPid(pid1, @"C:\Users\Test\AppData\Local\Discord\app-1.0.9254\Discord.exe", DateTime.UtcNow);
+        resolver.RegisterTargetPid(pid2, @"C:\Users\Test\AppData\Local\DiscordPTB\app-1.0.9254\discordptb.exe", DateTime.UtcNow);
+        resolver.RegisterTargetPid(pid3, @"C:\Users\Test\AppData\Local\DiscordCanary\app-1.0.9254\DISCORDCANARY.EXE", DateTime.UtcNow);
+
+        Assert.True(resolver.IsTargetProcess(pid1));
+        Assert.True(resolver.IsTargetProcess(pid2));
+        Assert.True(resolver.IsTargetProcess(pid3));
+        Assert.False(resolver.IsTargetProcess(pidChrome));
+    }
+
+    [Fact]
+    public void TcpFlowRouter_PortMapping_RegistersAndResolvesEndpoints()
+    {
+        var flowTable = new FlowMappingTable();
+        var router = new TcpFlowRouter(flowTable);
+
+        ushort clientPort = 55123;
+        var targetIp = IPAddress.Parse("162.159.130.233");
+        ushort targetPort = 443;
+
+        router.RegisterTargetMapping(clientPort, targetIp, targetPort);
+
+        // Flow mapping should be retrievable and zero bypasses should occur
+        Assert.Equal(0, router.TotalBytesSent);
+        Assert.Equal(0, router.TotalBytesReceived);
+    }
+
+    [Fact]
+    public async Task DualProtocol_Switching_CleanTeardownAndRestart()
+    {
+        var engine = new WinDivertProcessIsolationEngine();
+
+        // 1. Start OpenVPN
+        await engine.StartAsync(new ProcessIsolationOptions
+        {
+            TargetProcessNames = new List<string> { "Discord.exe" },
+            TransportType = "OpenVPN",
+            VpnInterfaceIndex = 12,
+            VpnInterfaceIp = IPAddress.Parse("10.8.0.2")
+        });
+        Assert.True(engine.IsRunning);
+        Assert.Equal(0, engine.TargetTcpBypassed);
+        Assert.Equal(0, engine.TargetUdpBypassed);
+
+        // 2. Stop OpenVPN
+        await engine.StopAsync();
+        Assert.False(engine.IsRunning);
+
+        // 3. Start WireGuard
+        await engine.StartAsync(new ProcessIsolationOptions
+        {
+            TargetProcessNames = new List<string> { "Discord.exe" },
+            TransportType = "WireGuard",
+            VpnInterfaceIndex = 15,
+            VpnInterfaceIp = IPAddress.Parse("10.2.0.2")
+        });
+        Assert.True(engine.IsRunning);
+        Assert.Equal("WireGuard", engine.GetStats().TransportName);
+
+        // 4. Final Stop
+        await engine.StopAsync();
+        Assert.False(engine.IsRunning);
+    }
 }

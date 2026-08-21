@@ -555,7 +555,8 @@ public class MainViewModel : INotifyPropertyChanged
 
             // Step 7: Connected
             _stateMachine.TransitionTo(ConnectionState.Connected, $"Connected to {SelectedServer.Name}");
-            _healthMonitor.StartMonitoring(profile.Wireguard.Endpoint);
+            var monEndpoint = profile.Wireguard?.Endpoint ?? profile.Openvpn?.RemoteEndpoints.FirstOrDefault()?.Host ?? "1.1.1.1";
+            _healthMonitor.StartMonitoring(monEndpoint);
         }
         catch (Exception ex)
         {

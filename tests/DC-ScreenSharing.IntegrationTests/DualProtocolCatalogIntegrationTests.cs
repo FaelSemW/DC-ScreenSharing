@@ -25,7 +25,18 @@ public class DualProtocolCatalogIntegrationTests : IClassFixture<WebApplicationF
         Environment.SetEnvironmentVariable("ProfileService__StoragePath", _testStorageDir);
         Environment.SetEnvironmentVariable("ADMIN_API_KEY", TestAdminApiKey);
 
-        _factory = factory.WithWebHostBuilder(builder => { });
+        _factory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((ctx, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["ADMIN_API_KEY"] = TestAdminApiKey,
+                    ["Admin:ApiKey"] = TestAdminApiKey,
+                    ["ProfileService:StoragePath"] = _testStorageDir
+                });
+            });
+        });
         _client = _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             HandleCookies = true,
