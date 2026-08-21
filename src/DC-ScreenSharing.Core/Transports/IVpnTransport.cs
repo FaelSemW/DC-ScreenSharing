@@ -9,5 +9,5 @@ public interface IVpnTransport
     bool IsSupported { get; }
     Task<TunnelResponse> ConnectAsync(ServerEntry server, ServerProfile profile, CancellationToken cancellationToken = default);
     Task<TunnelResponse> DisconnectAsync(CancellationToken cancellationToken = default);
-    Task<ServiceStatusResponse> GetStatusAsync(CancellationToken cancellationToken = default);
+    Task<ServiceStatusResponse?> GetStatusAsync(CancellationToken cancellationToken = default);
 }

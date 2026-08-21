@@ -1420,8 +1420,8 @@ async function loadGenerations() {
                                 <span class="row-title">Generation #${g.generation}</span>
                                 <span class="badge ${g.isActive ? 'badge-active' : 'badge-expired'}">${g.isActive ? 'Active Generation' : 'Archived'}</span>
                                 <span class="badge badge-accent">Total: ${g.serverCount}</span>
-                                <span class="badge badge-single">WG: ${g.wireguardCount || 0}</span>
-                                <span class="badge badge-warning">OVPN: ${g.openVpnCount || 0}</span>
+                                <span class="badge badge-single">WG: ${(g.wireGuardCount !== undefined ? g.wireGuardCount : g.wireguardCount) || 0}</span>
+                                <span class="badge badge-warning">OVPN: ${(g.openVpnCount !== undefined ? g.openVpnCount : g.openvpnCount) || 0}</span>
                             </div>
                             <div class="row-meta">
                                 <span>Published: ${formatDate(g.publishedAtUtc)}</span>

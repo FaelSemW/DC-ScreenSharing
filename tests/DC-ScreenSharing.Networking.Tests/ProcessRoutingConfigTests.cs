@@ -165,4 +165,55 @@ PersistentKeepalive = 25
         var configJson = engine.GenerateEngineConfig(config);
         Assert.NotNull(configJson);
     }
+
+    [Fact]
+    public void ValidateRuntimeConfiguration_OpenVpn_RequiresProfileJsonAndEndpoints()
+    {
+        var logger = new FileLogger(Path.GetTempPath());
+        var engine = new ProcessRoutingEngine(logger);
+
+        // Case 1: Missing JSON
+        var badConfig1 = new TunnelConfiguration
+        {
+            ServerId = "ovpn-1",
+            Protocol = VpnProtocol.OpenVpn,
+            OpenVpnProfileJson = null
+        };
+        var (valid1, err1) = engine.ValidateRuntimeConfiguration(badConfig1);
+        Assert.False(valid1);
+        Assert.Contains("missing", err1);
+
+        // Case 2: auth-user-pass true but missing username
+        var ovpnConfig = new OpenVpnProfileConfig
+        {
+            RemoteEndpoints = new List<OpenVpnRemoteEndpoint>
+            {
+                new OpenVpnRemoteEndpoint { Host = "147.135.15.16", Port = 443, Proto = "tcp" }
+            },
+            AuthUserPass = true,
+            Username = null
+        };
+        var badConfig2 = new TunnelConfiguration
+        {
+            ServerId = "ovpn-2",
+            Protocol = VpnProtocol.OpenVpn,
+            OpenVpnProfileJson = JsonSerializer.Serialize(ovpnConfig)
+        };
+        var (valid2, err2) = engine.ValidateRuntimeConfiguration(badConfig2);
+        Assert.False(valid2);
+        Assert.Contains("username is missing", err2);
+
+        // Case 3: Valid config
+        ovpnConfig.Username = "vpnbook";
+        var goodConfig = new TunnelConfiguration
+        {
+            ServerId = "ovpn-3",
+            Protocol = VpnProtocol.OpenVpn,
+            OpenVpnProfileJson = JsonSerializer.Serialize(ovpnConfig)
+        };
+        var (valid3, err3) = engine.ValidateRuntimeConfiguration(goodConfig);
+        Assert.True(valid3);
+        Assert.Null(err3);
+    }
 }
+

@@ -462,7 +462,7 @@ public class MainViewModel : INotifyPropertyChanged
                 return;
             }
 
-            var isOvpn = VpnProtocol.IsOpenVpn(SelectedServer.Protocol) || (profile.Openvpn != null && profile.Wireguard == null);
+            var isOvpn = VpnProtocol.IsOpenVpn(SelectedServer.Protocol);
             var tunnelConfig = new TunnelConfiguration
             {
                 ServerId = profile.ServerId,
@@ -555,8 +555,12 @@ public class MainViewModel : INotifyPropertyChanged
 
             // Step 7: Connected
             _stateMachine.TransitionTo(ConnectionState.Connected, $"Connected to {SelectedServer.Name}");
-            var monEndpoint = profile.Wireguard?.Endpoint ?? profile.Openvpn?.RemoteEndpoints.FirstOrDefault()?.Host ?? "1.1.1.1";
-            _healthMonitor.StartMonitoring(monEndpoint);
+            var monEndpoint = profile.Wireguard != null
+                ? $"{profile.Wireguard.Endpoint}:{profile.Wireguard.Port}"
+                : profile.Openvpn?.RemoteEndpoints.FirstOrDefault() != null
+                    ? $"{profile.Openvpn.RemoteEndpoints[0].Host}:{profile.Openvpn.RemoteEndpoints[0].Port}"
+                    : "1.1.1.1:443";
+            _healthMonitor.StartMonitoring(monEndpoint, proxyPort: 15888);
         }
         catch (Exception ex)
         {

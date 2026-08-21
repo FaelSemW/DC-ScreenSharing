@@ -233,16 +233,6 @@ public class MaintainerViewModel : INotifyPropertyChanged
 
         LoadOrInitializeSigningKeys();
         LoadSavedSettingsAndSecrets();
-
-        // Automatically query ProfileService for current active generation on startup
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await RefreshActiveGenerationAsync();
-            }
-            catch { }
-        });
     }
 
     private void LoadOrInitializeSigningKeys()

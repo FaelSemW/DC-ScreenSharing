@@ -246,4 +246,34 @@ remote vpn.example.com 1194
         var failedDecrypted = CredentialCrypto.Decrypt(encrypted, "wrong-key");
         Assert.Equal(string.Empty, failedDecrypted);
     }
+
+    [Fact]
+    public void Parse_LocalVpnBookUs16Profile_ExtractsSafeMetadata()
+    {
+        var localPath = Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "..", "..", "..", "vpnbook-us16-tcp443.ovpn");
+        if (!File.Exists(localPath))
+        {
+            localPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "vpnbook-us16-tcp443.ovpn");
+        }
+        if (!File.Exists(localPath))
+        {
+            localPath = @"d:\DC-ScreenSharing\vpnbook-us16-tcp443.ovpn";
+        }
+
+        if (File.Exists(localPath))
+        {
+            var content = File.ReadAllText(localPath);
+            var validation = OpenVpnConfigParser.ParseAndValidate(content);
+            Assert.True(validation.IsValid, validation.Error);
+            Assert.NotNull(validation.ParsedConfig);
+            Assert.Equal("TCP", validation.Protocol);
+            Assert.Equal("147.135.15.16:443", validation.PrimaryRemote);
+            Assert.True(validation.ParsedConfig.AuthUserPass);
+            Assert.False(string.IsNullOrEmpty(validation.ParsedConfig.CaCert));
+            Assert.False(string.IsNullOrEmpty(validation.ParsedConfig.ClientCert));
+            Assert.False(string.IsNullOrEmpty(validation.ParsedConfig.ClientKey));
+            Assert.True(string.IsNullOrEmpty(validation.ParsedConfig.TlsAuthKey));
+            Assert.True(string.IsNullOrEmpty(validation.ParsedConfig.TlsCryptKey));
+        }
+    }
 }

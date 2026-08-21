@@ -6,6 +6,7 @@ using DCSS.ProfileService.Controllers;
 using DCSS.ProfileService.Services;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using DCScreenSharing.Shared.Logging;
 using Xunit;
 
 namespace DCScreenSharing.IntegrationTests;
@@ -350,4 +351,103 @@ MIIFakeCert...
         Assert.NotNull(catalog);
         Assert.Contains(catalog.Servers, s => s.Name == "Atomic Publish Server");
     }
+
+    [Fact]
+    public async Task GenerationHistory_ComputesAccurateCounts_AndFulfillsTotalInvariant()
+    {
+        await AuthenticateAdminAsync();
+
+        // 1. Add OpenVPN server with publish immediately
+        var ovpnContent = @"
+client
+dev tun
+proto udp
+remote 198.51.100.99 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+cipher AES-256-GCM
+auth SHA256
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIFakeCert...
+-----END CERTIFICATE-----
+</ca>
+";
+        var addResp = await _client.PostAsJsonAsync("/api/v1/admin/servers/openvpn", new AddOpenVpnServerRequest
+        {
+            DisplayName = "Invariant Check OVPN Server",
+            Country = "United States",
+            CountryCode = "US",
+            Region = "North America",
+            Provider = "VPNBook",
+            OvpnContent = ovpnContent,
+            PublishImmediately = true
+        });
+        Assert.True(addResp.IsSuccessStatusCode);
+
+        // 2. Fetch generation history
+        var historyResp = await _client.GetAsync("/api/v1/admin/generations");
+        Assert.True(historyResp.IsSuccessStatusCode);
+        var history = await historyResp.Content.ReadFromJsonAsync<List<GenerationRecord>>();
+        Assert.NotNull(history);
+        Assert.NotEmpty(history);
+
+        var active = history.First(g => g.IsActive);
+        Assert.True(active.ServerCount > 0);
+        // Verify TOTAL == WG + OVPN invariant
+        Assert.Equal(active.ServerCount, active.WireGuardCount + active.OpenVpnCount);
+        Assert.True(active.OpenVpnCount >= 1);
+    }
+
+    [Fact]
+    public void PublishGeneration_RejectsInvalidOrUnknownProtocol()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ProfileService:StoragePath"] = _testStorageDir
+            })
+            .Build();
+
+        var store = new ProfileStoreService(config, new FileLogger(_testStorageDir));
+        var (privKey, _) = ProfileCrypto.GenerateKeyPair();
+
+        var badCatalog = new ServerCatalog
+        {
+            Schema = 1,
+            Generation = 999,
+            PublishedAtUtc = DateTime.UtcNow,
+            Servers = new List<ServerEntry>
+            {
+                new ServerEntry
+                {
+                    Id = "invalid-proto-1",
+                    Name = "Bad Proto Server",
+                    Protocol = "UNKNOWN_PROTOCOL_XYZ",
+                    Country = "US",
+                    CountryCode = "US",
+                    Region = "US",
+                    Provider = "Custom",
+                    Enabled = true
+                }
+            }
+        };
+
+        var catalogJson = JsonSerializer.Serialize(badCatalog);
+        var sig = ProfileCrypto.SignData(catalogJson, privKey);
+
+        var manifest = new SignedManifest
+        {
+            Generation = 999,
+            CatalogJson = catalogJson,
+            SignatureBase64 = sig,
+            PublishedAtUtc = DateTime.UtcNow
+        };
+
+        bool published = store.PublishGeneration(manifest, "Test");
+        Assert.False(published, "PublishGeneration must reject unknown protocols.");
+    }
 }
+

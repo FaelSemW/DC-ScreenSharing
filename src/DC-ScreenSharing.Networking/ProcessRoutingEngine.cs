@@ -103,6 +103,13 @@ public class ProcessRoutingEngine : IAsyncDisposable
             catch { }
         }
 
+        if (ovpnConfig != null && ovpnConfig.AuthUserPass && string.IsNullOrEmpty(ovpnConfig.Username))
+        {
+            CleanupTempFiles();
+            _logger.Error("[OpenVPN] Profile requires user/password authentication, but username is missing.");
+            return (false, "OpenVpnMissingCredentials", "OpenVPN profile requires authentication credentials, but none were provided.");
+        }
+
         // 2. Generate sanitized temporary .ovpn file
         _tempOvpnConfigPath = Path.Combine(_workingDirectory, $"openvpn_runtime_{Guid.NewGuid():N}.ovpn");
         var ovpnContent = GenerateSanitizedOvpnConfig(config, ovpnConfig);
@@ -149,6 +156,7 @@ public class ProcessRoutingEngine : IAsyncDisposable
         _openVpnProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
         var tcsReady = new TaskCompletionSource<bool>();
+        string? openVpnFailureReason = null;
 
         _openVpnProcess.OutputDataReceived += (s, e) =>
         {
@@ -161,6 +169,17 @@ public class ProcessRoutingEngine : IAsyncDisposable
                 }
                 else if (e.Data.Contains("AUTH_FAILED", StringComparison.OrdinalIgnoreCase))
                 {
+                    openVpnFailureReason = "OpenVPN authentication failed (invalid username or password).";
+                    tcsReady.TrySetResult(false);
+                }
+                else if (e.Data.Contains("TLS Error", StringComparison.OrdinalIgnoreCase) || e.Data.Contains("TLS handshake failed", StringComparison.OrdinalIgnoreCase))
+                {
+                    openVpnFailureReason = "OpenVPN TLS handshake failed.";
+                    tcsReady.TrySetResult(false);
+                }
+                else if (e.Data.Contains("RESOLVE: Cannot resolve host", StringComparison.OrdinalIgnoreCase))
+                {
+                    openVpnFailureReason = "OpenVPN remote host resolution failed.";
                     tcsReady.TrySetResult(false);
                 }
             }
@@ -192,17 +211,39 @@ public class ProcessRoutingEngine : IAsyncDisposable
         }
         catch { }
 
-        if (_openVpnProcess.HasExited)
+        if (!isReady || _openVpnProcess.HasExited)
         {
-            int exitCode = _openVpnProcess.ExitCode;
+            try
+            {
+                if (!_openVpnProcess.HasExited)
+                {
+                    _openVpnProcess.Kill(entireProcessTree: true);
+                    _openVpnProcess.WaitForExit(1000);
+                }
+            }
+            catch { }
+            finally
+            {
+                _openVpnProcess.Dispose();
+                _openVpnProcess = null;
+            }
+
             CleanupTempFiles();
-            return (false, "OpenVpnExitedEarly", $"OpenVPN terminated with exit code {exitCode}.");
+            var errReason = openVpnFailureReason ?? "OpenVPN transport initialization timed out or failed to complete handshake.";
+            _logger.Error($"[OpenVPN] {errReason}");
+            return (false, "OpenVpnHandshakeFailed", errReason);
         }
 
-        // 6. Discover VPN adapter name and start sing-box TUN process routing
+        // 6. Discover VPN adapter name and verify operational status
         var vpnAdapter = InterfaceBindingService.FindVpnAdapter("OpenVPN");
-        string adapterName = vpnAdapter?.Name ?? "OpenVPN";
-        _logger.Info($"[OpenVPN] OpenVPN tunnel active on adapter '{adapterName}'. Starting process routing engine...");
+        if (vpnAdapter == null || vpnAdapter.Status != System.Net.NetworkInformation.OperationalStatus.Up || vpnAdapter.IpAddress == null)
+        {
+            Stop();
+            _logger.Error("[OpenVPN] Transport ready milestone reached, but no operational OpenVPN adapter with assigned IP was found.");
+            return (false, "VpnAdapterNotReady", "OpenVPN adapter is not operational or has no assigned IP address.");
+        }
+        string adapterName = vpnAdapter.Name;
+        _logger.Info($"[OpenVPN] OpenVPN tunnel active on operational adapter '{adapterName}' (Index: {vpnAdapter.InterfaceIndex}, IP: {vpnAdapter.IpAddress}). Starting process routing engine...");
 
         var engineExe = FindEngineExecutable();
         if (!string.IsNullOrEmpty(engineExe) && File.Exists(engineExe))
@@ -254,8 +295,17 @@ public class ProcessRoutingEngine : IAsyncDisposable
         _isolationEngine.StartAsync(new ProcessIsolationOptions
         {
             TargetProcessNames = config.AllowedApps ?? new List<string> { "Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe" },
-            TransportType = "OpenVPN"
+            TransportType = "OpenVPN",
+            VpnInterfaceIndex = vpnAdapter.InterfaceIndex,
+            VpnInterfaceIp = vpnAdapter.IpAddress
         }).GetAwaiter().GetResult();
+
+        if (!_isolationEngine.IsRunning)
+        {
+            Stop();
+            _logger.Error("[OpenVPN] WinDivert process isolation engine failed to start.");
+            return (false, "ProcessIsolationFailed", "Process isolation engine failed to start.");
+        }
 
         _logger.Info($"[OpenVPN] OpenVPN tunnel and WinDivert process isolation active.");
         return (true, null, "OpenVPN tunnel active.");
@@ -474,7 +524,30 @@ public class ProcessRoutingEngine : IAsyncDisposable
     {
         if (string.Equals(config.Protocol, VpnProtocol.OpenVpn, StringComparison.OrdinalIgnoreCase))
         {
-            return (true, null);
+            if (string.IsNullOrWhiteSpace(config.OpenVpnProfileJson))
+            {
+                return (false, "OpenVPN runtime configuration profile JSON is missing.");
+            }
+
+            try
+            {
+                var ovpn = JsonSerializer.Deserialize<OpenVpnProfileConfig>(config.OpenVpnProfileJson);
+                if (ovpn == null || ovpn.RemoteEndpoints.Count == 0)
+                {
+                    return (false, "OpenVPN configuration contains no remote endpoints.");
+                }
+
+                if (ovpn.AuthUserPass && string.IsNullOrEmpty(ovpn.Username))
+                {
+                    return (false, "OpenVPN profile requires authentication, but username is missing.");
+                }
+
+                return (true, null);
+            }
+            catch (Exception ex)
+            {
+                return (false, $"OpenVPN configuration JSON parsing error: {ex.Message}");
+            }
         }
 
         try

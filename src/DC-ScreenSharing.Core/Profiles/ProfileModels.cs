@@ -16,8 +16,19 @@ public static class VpnProtocol
         string.Equals(protocol, WireGuard, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(protocol, "wireguard", StringComparison.OrdinalIgnoreCase);
 
+    public static bool IsStrictWireGuard(string? protocol) =>
+        string.Equals(protocol, WireGuard, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(protocol, "wireguard", StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsValidProtocol(string? protocol) =>
+        !string.IsNullOrWhiteSpace(protocol) &&
+        (string.Equals(protocol, OpenVpn, StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(protocol, "openvpn", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(protocol, WireGuard, StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(protocol, "wireguard", StringComparison.OrdinalIgnoreCase));
+
     public static string Normalize(string? protocol) =>
-        IsOpenVpn(protocol) ? OpenVpn : WireGuard;
+        IsOpenVpn(protocol) ? OpenVpn : (IsStrictWireGuard(protocol) ? WireGuard : (string.IsNullOrEmpty(protocol) ? WireGuard : protocol?.ToUpperInvariant() ?? WireGuard));
 }
 
 public class ServerEntry

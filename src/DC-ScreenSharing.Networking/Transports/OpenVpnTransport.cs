@@ -95,7 +95,7 @@ public class OpenVpnTransport : IVpnTransport
         return await _client.StopTunnelAsync(ct: cancellationToken);
     }
 
-    public async Task<ServiceStatusResponse> GetStatusAsync(CancellationToken cancellationToken = default)
+    public async Task<ServiceStatusResponse?> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         return await _client.GetStatusAsync(ct: cancellationToken);
     }

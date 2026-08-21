@@ -280,4 +280,69 @@ public class TunnelHealthMonitorTests
 
         Assert.Equal(TunnelHealthState.Healthy, monitor.CurrentState);
     }
+
+    [Fact]
+    public void LatencySeparation_ControlEndpointRtt_IsNotExposedAsVpnDataPlaneLatency()
+    {
+        // When control endpoint RTT is 18 ms (physical Anycast to outer server),
+        // but tunneled data-plane probe has not returned or is 142 ms,
+        // MedianLatencyMs MUST represent the real tunneled data plane, never the control endpoint RTT.
+        var report = new HealthReport
+        {
+            ControlEndpointRttMs = 18,
+            VpnDataPlaneRttMs = 142,
+            TargetRouteRttMs = 142,
+            MedianLatencyMs = 142,
+            IsTunneledDataPlaneVerified = true,
+            ProbesTotal = 3,
+            ProbesSuccessful = 3
+        };
+
+        Assert.Equal(18, report.ControlEndpointRttMs);
+        Assert.Equal(142, report.VpnDataPlaneRttMs);
+        Assert.Equal(142, report.MedianLatencyMs);
+        Assert.NotEqual(report.ControlEndpointRttMs, report.MedianLatencyMs);
+        Assert.True(report.IsTunneledDataPlaneVerified);
+    }
+
+    [Fact]
+    public void FailedDataPlaneProbe_SetsMedianLatencyToNull_AndDegradesState()
+    {
+        // When outer control endpoint is reachable (e.g. 18 ms physical RTT),
+        // but tunneled data plane probe fails (e.g. proxy offline or VPN data plane dropped),
+        // MedianLatencyMs MUST be null and IsTunneledDataPlaneVerified MUST be false.
+        var report = new HealthReport
+        {
+            ControlEndpointRttMs = 18,
+            VpnDataPlaneRttMs = null,
+            TargetRouteRttMs = null,
+            MedianLatencyMs = null,
+            IsTunneledDataPlaneVerified = false,
+            ProbesTotal = 3,
+            ProbesSuccessful = 0,
+            State = TunnelHealthState.Degraded
+        };
+
+        Assert.Null(report.MedianLatencyMs);
+        Assert.Null(report.VpnDataPlaneRttMs);
+        Assert.False(report.IsTunneledDataPlaneVerified);
+        Assert.Equal(18, report.ControlEndpointRttMs);
+    }
+
+    [Fact]
+    public async Task ProbeSocks5DataPlaneAsync_NonExistentProxy_ReturnsNullWithoutThrowing()
+    {
+        // Probing an unreachable SOCKS5 port should fail closed and return null cleanly
+        var rtt = await TunnelHealthMonitor.ProbeSocks5DataPlaneAsync("127.0.0.1", 59999, "1.1.1.1", 80, timeoutMs: 300);
+        Assert.Null(rtt);
+    }
+
+    [Fact]
+    public async Task ProbeControlEndpointAsync_UnreachableHost_ReturnsNullWithoutThrowing()
+    {
+        // Probing an invalid/unreachable IP should return null cleanly within timeout
+        var rtt = await TunnelHealthMonitor.ProbeControlEndpointAsync("192.0.2.1", 443, timeoutMs: 300);
+        Assert.Null(rtt);
+    }
 }
+

@@ -21,10 +21,10 @@ public class GenerationRecord
     [JsonPropertyName("serverCount")]
     public int ServerCount { get; set; }
 
-    [JsonPropertyName("wireguardCount")]
+    [JsonPropertyName("wireGuardCount")]
     public int WireGuardCount { get; set; }
 
-    [JsonPropertyName("openvpnCount")]
+    [JsonPropertyName("openVpnCount")]
     public int OpenVpnCount { get; set; }
 
     [JsonPropertyName("isActive")]
@@ -850,6 +850,11 @@ public class ProfileStoreService
                 // Pre-publication validation
                 foreach (var s in enabledServers)
                 {
+                    if (!VpnProtocol.IsValidProtocol(s.Meta.Protocol))
+                    {
+                        return (false, $"Validation failed: Server '{s.Meta.Name}' has unknown or invalid protocol '{s.Meta.Protocol}'.", 0);
+                    }
+
                     if (VpnProtocol.IsOpenVpn(s.Meta.Protocol))
                     {
                         if (s.Profile.Openvpn == null || s.Profile.Openvpn.RemoteEndpoints.Count == 0)
@@ -869,6 +874,17 @@ public class ProfileStoreService
                                 return (false, $"Validation failed: OpenVPN server '{s.Meta.Name}' is linked to missing Credential Set '{credId}'.", 0);
                             }
                         }
+
+                        // If OpenVPN requires user/password authentication, verify credentials exist
+                        if (s.Profile.Openvpn.AuthUserPass)
+                        {
+                            bool hasDirectCreds = !string.IsNullOrEmpty(s.Profile.Openvpn.Username);
+                            bool hasValidCredSet = !string.IsNullOrEmpty(credId) && _credentialSetService != null && _credentialSetService.GetById(credId) != null;
+                            if (!hasDirectCreds && !hasValidCredSet)
+                            {
+                                return (false, $"Validation failed: OpenVPN server '{s.Meta.Name}' requires authentication (auth-user-pass), but has neither direct credentials nor a valid linked Credential Set.", 0);
+                            }
+                        }
                     }
                     else if (VpnProtocol.IsWireGuard(s.Meta.Protocol))
                     {
@@ -877,6 +893,13 @@ public class ProfileStoreService
                             return (false, $"Validation failed: WireGuard server '{s.Meta.Name}' has no endpoint configured.", 0);
                         }
                     }
+                }
+
+                int wgTotal = enabledServers.Count(s => VpnProtocol.IsWireGuard(s.Meta.Protocol));
+                int ovpnTotal = enabledServers.Count(s => VpnProtocol.IsOpenVpn(s.Meta.Protocol));
+                if (enabledServers.Count != wgTotal + ovpnTotal)
+                {
+                    return (false, $"Classification invariant failed: TOTAL ({enabledServers.Count}) != WG ({wgTotal}) + OVPN ({ovpnTotal}).", 0);
                 }
 
                 var currentGen = GetActiveGenerationNumber();
@@ -1023,6 +1046,23 @@ public class ProfileStoreService
                     return false;
                 }
 
+                foreach (var s in catalog.Servers)
+                {
+                    if (!VpnProtocol.IsValidProtocol(s.Protocol))
+                    {
+                        _logger.Warning($"Rejected publication: Server '{s.Name}' has unknown/invalid protocol '{s.Protocol}'.");
+                        return false;
+                    }
+                }
+
+                int wgCount = catalog.Servers.Count(s => VpnProtocol.IsWireGuard(s.Protocol));
+                int ovpnCount = catalog.Servers.Count(s => VpnProtocol.IsOpenVpn(s.Protocol));
+                if (catalog.Servers.Count != wgCount + ovpnCount)
+                {
+                    _logger.Warning($"Rejected publication: Classification invariant failed (TOTAL {catalog.Servers.Count} != WG {wgCount} + OVPN {ovpnCount}).");
+                    return false;
+                }
+
                 var currentGen = GetActiveGenerationNumber();
                 if (manifest.Generation <= currentGen)
                 {
@@ -1073,7 +1113,12 @@ public class ProfileStoreService
         {
             var history = new List<GenerationRecord>();
             var activeGen = GetActiveGenerationNumber();
-            var genFiles = Directory.GetFiles(Path.Combine(_storageDirectory, "generations"), "manifest_gen_*.json");
+            var genDir = Path.Combine(_storageDirectory, "generations");
+            if (!Directory.Exists(genDir))
+            {
+                return history;
+            }
+            var genFiles = Directory.GetFiles(genDir, "manifest_gen_*.json");
 
             foreach (var file in genFiles)
             {

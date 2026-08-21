@@ -699,7 +699,7 @@ public class AdminController : ControllerBase
 
             var (success, error, entry, profile) = ProfileStoreService.ParseOpenVpnConfig(
                 s.OvpnContent,
-                s.DisplayName,
+                s.DisplayName ?? "OpenVPN Server",
                 s.Country,
                 s.CountryCode,
                 s.Region,
